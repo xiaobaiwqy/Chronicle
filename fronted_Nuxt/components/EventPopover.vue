@@ -81,7 +81,7 @@ onBeforeUnmount(() => {
     <template v-if="display">
       <div class="hd">
         <h3>{{ display.title }}</h3>
-        <span class="yr">{{ yrRange(display.year_start, display.year_end) + (display.dynasty ? ' · ' + display.dynasty : '') }}</span>
+        <span class="yr">{{ yrRange(display.year_start, display.year_end, display.year_approx) + (display.dynasty ? ' · ' + display.dynasty : '') }}</span>
         <button class="x" @click="emit('close')">✕</button>
       </div>
       <p>{{ display.description }}</p>

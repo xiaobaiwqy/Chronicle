@@ -68,7 +68,7 @@ const results = computed<Result[]>(() => {
         type: 'event',
         id: e.id,
         label: e.title,
-        sub: `${yrRange(e.year_start, e.year_end)} · ${e.dynasty}`,
+        sub: `${yrRange(e.year_start, e.year_end, e.year_approx)} · ${e.dynasty}`,
         color: dynastyColor(e.dynasty),
         tag: '记录',
       })

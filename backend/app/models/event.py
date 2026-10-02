@@ -1,5 +1,5 @@
 """事件模型,以及事件-人物的多对多关联(带 role)。"""
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -13,6 +13,7 @@ class Event(Base):
     description = Column(Text, default="")
     year_start = Column(Integer, nullable=True)
     year_end = Column(Integer, nullable=True)
+    year_approx = Column(Boolean, default=False, nullable=False)
     dynasty = Column(String, default="")
     location = Column(String, nullable=True)
 

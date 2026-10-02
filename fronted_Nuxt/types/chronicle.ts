@@ -28,6 +28,7 @@ export interface ChronicleEvent {
   description: string
   year_start: number | null
   year_end: number | null
+  year_approx: boolean
   dynasty: string
   location: string | null
   participants: EventParticipant[]

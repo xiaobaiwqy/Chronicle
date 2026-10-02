@@ -13,13 +13,18 @@ const NAME_W = 30 // 与 .dyn-name 字号一致,按朝代名长度兜底最小�
 const NAME_PAD = 24 // 名称两侧留白
 const PAD = 40 // 画布左右留白
 const TICK_GAP = 56 // 相邻刻度最小像素间距(低于则合并)
-const CARD_W = 150 // .tl-ev 卡片宽度(用于防重叠)
-const HALF = CARD_W / 2
+const CARD_W = 150 // 卡片宽度
 const CARD_GAP = 6 // 相邻卡片最小间隙
 const ZOOM_MIN = 0.25
 
+// bin 展开随缩放的连续映射:zoom ≤ BIN_OPEN_AT 时该时间点仍是一个点,zoom ≥ BIN_FULL_AT 时完全展开为最小容纳宽度。
+const BIN_OPEN_AT = 1
+const BIN_FULL_AT = 2.5
+function binOpen(z: number): number {
+  return Math.max(0, Math.min(1, (z - BIN_OPEN_AT) / (BIN_FULL_AT - BIN_OPEN_AT)))
+}
+
 const wrapEl = ref<HTMLElement | null>(null)
-const H = ref(500)
 const zoom = ref(1)
 const scrollLeft = ref(0)
 const viewW = ref(0)
@@ -75,7 +80,7 @@ const allBands = computed(() =>
   [...TIMELINE_BANDS.map((b) => ({ ...b })), ...customBands.value].sort((a, b) => a.s - b.s),
 )
 
-// 布局:用给定 zoom 计算各分块宽度并累积起始像素(分块宽度 = max(名称兜底, (年份跨度×K_SPAN + 事件数×K_EVENT) × zoom))
+// 布局:用给定 zoom 计算各分块的自然宽度与自然起始像素(分块宽度 = max(名称兜底, (年份跨度×K_SPAN + 事件数×K_EVENT) × zoom))
 function computeLayout(z: number) {
   let x = PAD
   const items = allBands.value.map((b) => {
@@ -92,53 +97,103 @@ function computeLayout(z: number) {
 
 const layout = computed(() => computeLayout(zoom.value))
 
-// —— 无年份事件:"不详"区块固定在时间轴最右端 ——
-const undatedBand = computed(() => {
-  const count = filteredUndated.value.length
-  if (!count) return { x0: 0, x1: 0, w: 0, count }
-  const items = layout.value.items
-  const x0 = (items.length ? items[items.length - 1].x1 : PAD) + 40
-  const w = Math.max(NAME_W * 2 + NAME_PAD, count * (CARD_W + CARD_GAP) + PAD)
-  return { x0, x1: x0 + w, w, count }
-})
-const totalW = computed(() => Math.max(layout.value.totalW, undatedBand.value.x1 + PAD))
-
-const undatedCards = computed(() => {
-  const band = undatedBand.value
-  if (!band.count) return []
-  const AXIS = H.value / 2
-  return filteredUndated.value.map((e, i) => {
-    const x = band.x0 + PAD / 2 + i * (CARD_W + CARD_GAP)
-    const h = 50 + (i % 3) * 36
-    const above = i % 2 === 0
-    return { e, color: dynastyColor(e.dynasty), above, h, x, top: above ? AXIS - h - 62 : AXIS + 13 }
-  })
-})
-
-// 视口内可见的分块数:放大到只剩一个朝代块时,关闭悬浮发光
-const singleBand = computed(() => {
-  const x0 = scrollLeft.value
-  const x1 = scrollLeft.value + (viewW.value || 1)
-  return layout.value.items.filter((d) => d.x1 > x0 && d.x0 < x1).length <= 1
-})
-
-// 年份 -> 像素:分块内按年份线性,分块间按累积偏移;超出范围线性外推
+// 年份 -> 自然像素(未计入 bin 位移):分块内按年份线性,分块间按累积偏移;超出范围线性外推
 function xIn(y: number, items: { s: number; e: number; w: number; x0: number; x1: number }[]): number {
   if (!items.length) return PAD
   const first = items[0]
   if (y < first.s) return first.x0 + (y - first.s) * K_SPAN
   for (const seg of items) {
     if (y >= seg.s && y <= seg.e) {
-      return seg.x0 + ((y - seg.s) / (seg.e - seg.s)) * seg.w
+      const denom = seg.e - seg.s
+      // 自定义分块可能 s===e(仅单一年份且无结束年):退化为取分块中点
+      return seg.x0 + (denom === 0 ? 0.5 : (y - seg.s) / denom) * seg.w
     }
   }
   const last = items[items.length - 1]
   return last.x1 + (y - last.e) * K_SPAN
 }
 
-function X(y: number): number {
-  return xIn(y, layout.value.items)
+// —— bin 节点:同一年 ≥3 个事件时,该时间点被"切出"并插入一段展示长度 ——
+const bins = computed(() => {
+  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start)
+  const out: { year: number; n: number; minW: number; w: number }[] = []
+  for (let i = 0; i < sorted.length; ) {
+    const y = sorted[i].year_start
+    let j = i
+    while (j < sorted.length && sorted[j].year_start === y) j++
+    const n = j - i
+    if (n >= 3) {
+      const minW = n * (CARD_W + CARD_GAP) // 容纳该时间点全部事件的最小长度
+      out.push({ year: y, n, minW, w: minW * binOpen(zoom.value) })
+    }
+    i = j
+  }
+  return out
+})
+
+// 某年份之前所有 bin 的宽度之和(后续分块、刻度、事件整体右移)
+function shiftBefore(y: number): number {
+  let s = 0
+  for (const b of bins.value) if (b.year < y) s += b.w
+  return s
 }
+
+// 年份 -> 真实像素(自然位置 + 之前 bin 的累积位移)
+function X(y: number): number {
+  return xIn(y, layout.value.items) + shiftBefore(y)
+}
+
+// 分块在计入 bin 位移后的实际渲染位置(后续内容整体右移)
+const shiftedItems = computed(() =>
+  layout.value.items.map((seg) => {
+    const x0 = seg.x0 + shiftBefore(seg.s)
+    const x1 = seg.x1 + shiftBefore(seg.e)
+    return { ...seg, x0, x1, w: x1 - x0 }
+  }),
+)
+
+// bin 段的渲染位置(仅展开到一定宽度才标注,避免缩成点时出现碎片标签)
+const binSegs = computed(() =>
+  bins.value
+    .map((b) => {
+      const x0 = xIn(b.year, layout.value.items) + shiftBefore(b.year)
+      return { ...b, x0, x1: x0 + b.w }
+    })
+    .filter((b) => b.w > 24),
+)
+
+// —— 无年份事件:"不详"区块固定在时间轴最右端 ——
+const undatedBand = computed(() => {
+  const count = filteredUndated.value.length
+  if (!count) return { x0: 0, x1: 0, w: 0, count }
+  const items = shiftedItems.value
+  const x0 = (items.length ? items[items.length - 1].x1 : PAD) + 40
+  const w = Math.max(NAME_W * 2 + NAME_PAD, count * (CARD_W + CARD_GAP) + PAD)
+  return { x0, x1: x0 + w, w, count }
+})
+const totalW = computed(() => {
+  const items = shiftedItems.value
+  const axisEnd = items.length ? items[items.length - 1].x1 + PAD : PAD
+  return Math.max(axisEnd, undatedBand.value.x1 + PAD)
+})
+
+const undatedCards = computed(() => {
+  const band = undatedBand.value
+  if (!band.count) return []
+  return filteredUndated.value.map((e, i) => ({
+    e,
+    color: dynastyColor(e.dynasty),
+    x: band.x0 + PAD / 2 + i * (CARD_W + CARD_GAP),
+    above: i % 2 === 0,
+  }))
+})
+
+// 视口内可见的分块数:放大到只剩一个朝代块时,关闭悬浮发光
+const singleBand = computed(() => {
+  const x0 = scrollLeft.value
+  const x1 = scrollLeft.value + (viewW.value || 1)
+  return shiftedItems.value.filter((d) => d.x1 > x0 && d.x0 < x1).length <= 1
+})
 
 // 非均匀刻度:每个朝代的起始年 + 时间线末尾 + 事件年份,按像素间距去重
 const ticks = computed(() => {
@@ -156,69 +211,61 @@ const ticks = computed(() => {
   return out
 })
 
-// 事件卡片:按年份排序,上下两 lane 贪心防重叠——放不下的隐藏(LOD)。
-// 放大时分块拉宽、间距变大,更多事件能放下,从而展示更多细节事件。
+// —— 事件卡片 ——
+// 定位规则:
+//   1. 每个事件圆点严格落在轴线上它的真实年份 X(year) 处;
+//   2. 同一时间节点 1~2 个事件:圆点重合,卡片上下错开(第 1 个在上、第 2 个在下),不横向占位;
+//   3. 同一时间节点 ≥3 个事件:该点展开成一段 bin,事件沿轴在段内均匀分布(圆点仍在轴线上),卡片上下交替;
+//   4. 重叠隐藏:同侧卡片横向间距不足时靠后者隐藏,放大后逐步显现。
 const cards = computed(() => {
-  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start)
-  const AXIS = H.value / 2
+  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start || a.id - b.id)
+  const nodes: { year: number; evs: ChronicleEvent[] }[] = []
+  for (let i = 0; i < sorted.length; ) {
+    const y = sorted[i].year_start
+    let j = i
+    while (j < sorted.length && sorted[j].year_start === y) j++
+    nodes.push({ year: y, evs: sorted.slice(i, j) })
+    i = j
+  }
+  const placed: { e: ChronicleEvent; color: string; x: number; above: boolean }[] = []
+  for (const node of nodes) {
+    const n = node.evs.length
+    const bin = bins.value.find((b) => b.year === node.year)
+    const x0 = xIn(node.year, layout.value.items) + shiftBefore(node.year)
+    node.evs.forEach((e, k) => {
+      let x = x0
+      if (bin && bin.w > 0) x = x0 + (n <= 1 ? bin.w / 2 : (k / (n - 1)) * bin.w)
+      placed.push({ e, color: dynastyColor(e.dynasty), x, above: k % 2 === 0 })
+    })
+  }
+  // 重叠隐藏:上下两侧互不影响,同侧横向间距 < CARD_W+CARD_GAP 时靠后者隐藏;选中事件强制保留,确保搜索高亮一定可见
+  placed.sort((a, b) => a.x - b.x)
+  const keep: { e: ChronicleEvent; color: string; x: number; above: boolean }[] = []
   let lastAbove = -Infinity
   let lastBelow = -Infinity
-  let placed = 0
-  const out: { e: ChronicleEvent; color: string; above: boolean; h: number; x: number; top: number }[] = []
-  for (const e of sorted) {
-    const x = X(e.year_start)
-    const h = 50 + (placed % 3) * 36
-    if (x - HALF >= lastAbove + CARD_GAP) {
-      lastAbove = x + HALF
-      out.push({ e, color: dynastyColor(e.dynasty), above: true, h, x, top: AXIS - h - 62 })
-      placed++
-    } else if (x - HALF >= lastBelow + CARD_GAP) {
-      lastBelow = x + HALF
-      out.push({ e, color: dynastyColor(e.dynasty), above: false, h, x, top: AXIS + 13 })
-      placed++
-    }
-  }
-  return out
-})
-
-// 让当前筛选下所有事件卡片都能放下所需的最小 zoom(动态上限依据)。
-// 逐次翻倍扩张再二分收敛;同年事件上下两 lane 各最多一个,极端密集时上限随间距成比例拉高。
-const fitAllZoom = computed(() => {
-  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start)
-  const total = sorted.length
-  if (total < 2) return 1
-  const canAll = (z: number) => {
-    const { items } = computeLayout(z)
-    let lastAbove = -Infinity
-    let lastBelow = -Infinity
-    let placed = 0
-    for (const e of sorted) {
-      const x = xIn(e.year_start, items)
-      if (x - HALF >= lastAbove + CARD_GAP) {
-        lastAbove = x + HALF
-        placed++
-      } else if (x - HALF >= lastBelow + CARD_GAP) {
-        lastBelow = x + HALF
-        placed++
+  for (const c of placed) {
+    const isSel = c.e.id === props.selectedEventId
+    if (c.above) {
+      if (isSel || c.x - lastAbove >= CARD_W + CARD_GAP) {
+        keep.push(c)
+        lastAbove = c.x
       }
+    } else if (isSel || c.x - lastBelow >= CARD_W + CARD_GAP) {
+      keep.push(c)
+      lastBelow = c.x
     }
-    return placed >= total
   }
-  let lo = ZOOM_MIN
-  let hi = 2
-  let guard = 0
-  while (!canAll(hi) && guard++ < 60) hi *= 2
-  if (!canAll(hi)) return hi // 横向无法完全铺开时给一个很大的上限,避免死循环
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2
-    if (canAll(mid)) hi = mid
-    else lo = mid
-  }
-  return hi
+  return keep
 })
 
-// 动态放大上限:一直放大到所有事件可见为止(略留余量),替代固定上限
-const zoomMax = computed(() => Math.max(6, fitAllZoom.value * 1.2))
+// 有年份 + 无年份卡片合并渲染(同一套"节点锚定轴线"的结构)
+const allCards = computed(() => [
+  ...cards.value.map((c) => ({ ...c, key: 'd' + c.e.id })),
+  ...undatedCards.value.map((c) => ({ ...c, key: 'u' + c.e.id })),
+])
+
+// 事件横向铺开即可全部展示,放大上限固定。
+const zoomMax = computed(() => 6)
 
 // —— 拖拽横向滚动 ——
 let down = false
@@ -287,7 +334,7 @@ function animateTo(targetZoom: number, scrollAt: () => number) {
   requestAnimationFrame(step)
 }
 
-function focusBand(seg: { s: number; e: number; w: number }) {
+function focusBand(seg: { s: number; e: number; w: number; x0: number; x1: number }) {
   if (dragMoved > 6) return
   const vw = wrapEl.value!.clientWidth
   if (focusedS === seg.s) {
@@ -298,17 +345,22 @@ function focusBand(seg: { s: number; e: number; w: number }) {
     focusedS = seg.s
     const baseW = seg.w / zoom.value
     const targetZoom = Math.min(zoomMax.value, Math.max(ZOOM_MIN, vw / baseW))
-    animateTo(targetZoom, () => (X(seg.s) + X(seg.e)) / 2 - vw / 2)
+    animateTo(targetZoom, () => (seg.x0 + seg.x1) / 2 - vw / 2)
   }
 }
 
-// 搜索框选中事件:平滑放大到所有事件可见并滚动居中到该事件(高亮由 selectedEventId 驱动)
+// 搜索框选中事件:平滑放大到事件可见并滚动居中到该事件(高亮由 selectedEventId 驱动)。
+// 若事件落在拥挤节点(bin),放大到完全展开的缩放级别,确保能看到该时间点全部事件。
 function focusEvent(id: number) {
   if (!props.active || !wrapEl.value) return
   const e = props.events.find((x) => x.id === id)
   if (!e) return
   const vw = wrapEl.value.clientWidth
-  const targetZoom = Math.min(zoomMax.value, Math.max(zoom.value, fitAllZoom.value))
+  let targetZoom = Math.min(zoomMax.value, Math.max(zoom.value, 1))
+  if (e.year_start != null) {
+    const bin = bins.value.find((b) => b.year === e.year_start)
+    if (bin) targetZoom = Math.min(zoomMax.value, Math.max(zoom.value, BIN_FULL_AT))
+  }
   if (e.year_start == null) {
     animateTo(targetZoom, () => undatedBand.value.x0 - vw / 3)
   } else {
@@ -320,7 +372,6 @@ defineExpose({ focusEvent })
 
 function onResize() {
   if (!props.active) return
-  H.value = wrapEl.value?.clientHeight || 500
   syncScroll()
 }
 
@@ -341,7 +392,6 @@ watch(
   async (on) => {
     if (!on) return
     await nextTick()
-    H.value = wrapEl.value?.clientHeight || 500
     syncScroll()
     if (!scrolledOnce && wrapEl.value) {
       const first = [...datedEvents.value].sort((a, b) => a.year_start - b.year_start)[0]
@@ -366,7 +416,7 @@ onBeforeUnmount(() => {
   <div class="tl-wrap" :class="{ single: singleBand }" ref="wrapEl">
     <div class="tl-canvas" :style="{ width: totalW + 'px' }">
       <div
-        v-for="d in layout.items"
+        v-for="d in shiftedItems"
         :key="d.name + d.s"
         class="dyn-band"
         :style="{ left: d.x0 + 'px', width: d.w + 'px', '--dc': d.color }"
@@ -385,53 +435,31 @@ onBeforeUnmount(() => {
       <div v-for="y in ticks" :key="y" class="tl-tick" :style="{ left: X(y) + 'px' }">
         <span>{{ yrFmt(y) }}</span>
       </div>
-      <div
-        v-for="c in cards"
-        :key="c.e.id"
-        class="tl-ev"
-        :class="{ sel: c.e.id === selectedEventId }"
-        :style="{ left: c.x + 'px', top: c.top + 'px', '--dc': c.color }"
-        @click.stop="onCard(c.e.id)"
-      >
-        <template v-if="c.above">
-          <div class="bx">
-            <div class="t">{{ c.e.title }}</div>
-            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
-          </div>
-          <div class="stem" :style="{ height: c.h + 'px' }"></div>
-          <div class="nd"></div>
-        </template>
-        <template v-else>
-          <div class="nd"></div>
-          <div class="stem" :style="{ height: c.h + 'px' }"></div>
-          <div class="bx">
-            <div class="t">{{ c.e.title }}</div>
-            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
-          </div>
-        </template>
+      <div v-for="b in binSegs" :key="'bin' + b.year" class="tl-bin" :style="{ left: b.x0 + 'px', width: b.w + 'px' }">
+        <span class="tl-bin-lab">{{ yrFmt(b.year) }}</span>
       </div>
       <div
-        v-for="c in undatedCards"
-        :key="'u' + c.e.id"
+        v-for="c in allCards"
+        :key="c.key"
         class="tl-ev"
-        :class="{ sel: c.e.id === selectedEventId }"
-        :style="{ left: c.x + 'px', top: c.top + 'px', '--dc': c.color }"
+        :class="{ sel: c.e.id === selectedEventId, above: c.above, below: !c.above }"
+        :style="{ left: c.x + 'px', '--dc': c.color }"
         @click.stop="onCard(c.e.id)"
       >
         <template v-if="c.above">
           <div class="bx">
             <div class="t">{{ c.e.title }}</div>
-            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
+            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
           </div>
-          <div class="stem" :style="{ height: c.h + 'px' }"></div>
+          <div class="stem"></div>
           <div class="nd"></div>
         </template>
         <template v-else>
           <div class="nd"></div>
-          <div class="stem" :style="{ height: c.h + 'px' }"></div>
+          <div class="stem"></div>
           <div class="bx">
             <div class="t">{{ c.e.title }}</div>
-            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
+            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
           </div>
         </template>
       </div>

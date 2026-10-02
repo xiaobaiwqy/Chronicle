@@ -192,10 +192,21 @@ export function yrFmt(y: number | null | undefined): string {
   return y < 0 ? `前${-y}` : `${y}`
 }
 
-// 年份区间:两者相同时显示单个;缺一侧用 "?" 占位;都缺则 "不详"
-export function yrRange(a: number | null, b: number | null): string {
+// 年份区间:两者相同时显示单个;缺一侧用 "?" 占位;都缺则 "不详";approx 时加 "约" 前缀。
+export function yrRange(a: number | null, b: number | null, approx = false): string {
   if (a === null && b === null) return '不详'
   const start = a === null ? '?' : yrFmt(a)
   const end = b === null ? '?' : yrFmt(b)
-  return start === end ? start : `${start}–${end}`
+  const r = start === end ? start : `${start}–${end}`
+  return approx ? `约${r}` : r
+}
+
+// 解析年份输入:支持 "~" / "约" 前缀或后缀表示「约」(如 "~-260" / "-260~" / "约-260")。
+export function parseYear(raw: string): { year: number | null; approx: boolean } {
+  const t = (raw || '').trim()
+  const approx = /[~约]/.test(t)
+  const digits = t.replace(/[^0-9-]/g, '')
+  if (!digits || digits === '-') return { year: null, approx }
+  const n = Number(digits)
+  return { year: Number.isNaN(n) ? null : n, approx }
 }

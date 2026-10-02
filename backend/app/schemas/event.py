@@ -24,6 +24,7 @@ class EventBase(BaseModel):
     description: str = ""
     year_start: Optional[int] = None
     year_end: Optional[int] = None
+    year_approx: bool = False
     dynasty: str = ""
     location: Optional[str] = None
 
@@ -37,6 +38,7 @@ class EventUpdate(BaseModel):
     description: Optional[str] = None
     year_start: Optional[int] = None
     year_end: Optional[int] = None
+    year_approx: Optional[bool] = None
     dynasty: Optional[str] = None
     location: Optional[str] = None
     participants: Optional[List[ParticipantIn]] = None

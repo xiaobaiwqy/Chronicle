@@ -52,6 +52,7 @@ def event_to_schema(e: models.Event) -> schemas.Event:
         description=e.description or "",
         year_start=e.year_start,
         year_end=e.year_end,
+        year_approx=bool(e.year_approx),
         dynasty=e.dynasty or "",
         location=e.location,
         participants=participants,

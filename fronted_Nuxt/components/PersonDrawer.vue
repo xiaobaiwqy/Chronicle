@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { PersonDetail, SelectOption } from '~/types/chronicle'
-import { dynastyColor, dynastyOptions, yrRange } from '~/utils/dynasty'
+import type { ChronicleEvent, PersonDetail, SelectOption } from '~/types/chronicle'
+import { dynastyColor, dynastyOptions, parseYear, yrRange } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean; detail: PersonDetail | null; dimmedRelations?: number[]; dismissOnOutside?: boolean }>()
 const emit = defineEmits<{
@@ -15,7 +15,7 @@ const emit = defineEmits<{
 
 const { persons, update: updatePerson, remove: removePerson } = usePersons()
 const { createRelation, removeRelation } = useRelations()
-const { create, remove: removeEvent } = useEvents()
+const { create, update: updateEvent, remove: removeEvent } = useEvents()
 const { dynasties, ensure } = useDynasties()
 const { urlFor } = useAvatars()
 const toast = useToast()
@@ -43,6 +43,7 @@ watch(
     if (id === prevId) return
     editing.value = false
     confirmDelete.value = false
+    confirmDel.value = null
     showForm.value = false
     selEvents.value = new Set()
     if (props.open && prevId != null && id != null) {
@@ -71,6 +72,14 @@ const editing = ref(false)
 const saving = ref(false)
 const deleting = ref(false)
 const confirmDelete = ref(false)
+// 二次确认:关系删除 / 批量删除记录,首击进入待确认,再击才真正删除;3 秒无操作自动复位
+const confirmDel = ref<null | { kind: 'rel'; id: number } | { kind: 'batch' }>(null)
+let confirmDelTimer: ReturnType<typeof setTimeout> | null = null
+function armConfirm(v: NonNullable<typeof confirmDel.value>) {
+  confirmDel.value = v
+  if (confirmDelTimer) clearTimeout(confirmDelTimer)
+  confirmDelTimer = setTimeout(() => (confirmDel.value = null), 3000)
+}
 
 // —— 基础信息编辑 ——
 const form = reactive({
@@ -267,6 +276,11 @@ async function addRelation() {
 }
 
 async function delRelation(id: number) {
+  if (!(confirmDel.value?.kind === 'rel' && confirmDel.value.id === id)) {
+    armConfirm({ kind: 'rel', id })
+    return
+  }
+  confirmDel.value = null
   try {
     await removeRelation(id)
     toast.show('已删除关系')
@@ -320,6 +334,11 @@ async function deleteSelected() {
     toast.show('请先勾选记录')
     return
   }
+  if (confirmDel.value?.kind !== 'batch') {
+    armConfirm({ kind: 'batch' })
+    return
+  }
+  confirmDel.value = null
   try {
     await Promise.all(ids.map((id) => removeEvent(id)))
     toast.show(`已删除 ${ids.length} 条记录`)
@@ -343,7 +362,7 @@ async function submitRecord() {
     toast.show('请填写事件标题')
     return
   }
-  const y = recForm.year === '' ? null : Number(recForm.year)
+  const { year: y, approx } = parseYear(recForm.year)
   submitting.value = true
   try {
     await create({
@@ -351,6 +370,7 @@ async function submitRecord() {
       description: recForm.desc.trim(),
       year_start: y,
       year_end: y,
+      year_approx: approx,
       dynasty: d.person.dynasty,
       participants: [{ person_id: d.person.id, role: recForm.role.trim() || '参与' }],
     })
@@ -366,6 +386,59 @@ async function submitRecord() {
     toast.show('记录失败,请检查后端服务')
   } finally {
     submitting.value = false
+  }
+}
+
+// —— 编辑一条记录(编辑模式) ——
+const editingEventId = ref<number | null>(null)
+const savingEvent = ref(false)
+const editForm = reactive({ title: '', year: '', role: '', desc: '' })
+
+function startEditEvent(e: ChronicleEvent) {
+  editingEventId.value = e.id
+  editForm.title = e.title
+  editForm.year = e.year_start != null ? (e.year_approx ? '~' : '') + String(e.year_start) : ''
+  editForm.role = roleOf(e.id)
+  editForm.desc = e.description || ''
+}
+
+function cancelEditEvent() {
+  editingEventId.value = null
+}
+
+async function saveEditEvent(e: ChronicleEvent) {
+  const d = data.value
+  if (!d) return
+  if (!editForm.title.trim()) {
+    toast.show('请填写事件标题')
+    return
+  }
+  const { year: y, approx } = parseYear(editForm.year)
+  const pid = d.person.id
+  const role = editForm.role.trim() || '参与'
+  // 保留其它参与者,仅更新当前人物在该事件中的定位
+  const participants = e.participants.map((p) => ({
+    person_id: p.person_id,
+    role: p.person_id === pid ? role : (p.role || '参与'),
+  }))
+  savingEvent.value = true
+  try {
+    await updateEvent(e.id, {
+      title: editForm.title.trim(),
+      description: editForm.desc.trim(),
+      year_start: y,
+      year_end: y,
+      year_approx: approx,
+      participants,
+    })
+    toast.show('已保存')
+    editingEventId.value = null
+    emit('updated')
+  } catch (err) {
+    console.error('[Chronicle] 保存记录失败', err)
+    toast.show('保存失败,请检查后端服务')
+  } finally {
+    savingEvent.value = false
   }
 }
 
@@ -595,7 +668,7 @@ onBeforeUnmount(() => {
               <span class="rel-chip">
                 {{ r.label }} <b>{{ r.directed ? (r.from_person_id === data.person.id ? '→' : '←') : '↔' }} {{ r.other_name }}</b>
               </span>
-              <button class="mini-del" @click="delRelation(r.id)">✕</button>
+              <button class="mini-del" :class="{ on: confirmDel?.kind === 'rel' && confirmDel.id === r.id }" @click="delRelation(r.id)">{{ confirmDel?.kind === 'rel' && confirmDel.id === r.id ? '确认?' : '✕' }}</button>
             </div>
           </div>
           <span v-else class="empty">暂无关系</span>
@@ -622,15 +695,42 @@ onBeforeUnmount(() => {
         <div v-if="data.events.length" class="rec-batch">
           <div class="rec-batch-bar">
             <label class="ck"><input type="checkbox" class="ckbox" :checked="allSelected()" @change="toggleAll" /> 全选</label>
-            <button class="btn ghost sm" :disabled="!selEvents.size" @click="deleteSelected">删除选中</button>
+            <button class="btn sm" :class="confirmDel?.kind === 'batch' ? 'danger' : 'ghost'" :disabled="!selEvents.size" @click="deleteSelected">{{ confirmDel?.kind === 'batch' ? '确认删除?' : '删除选中' }}</button>
           </div>
-          <div v-for="e in data.events" :key="'ce' + e.id" class="rec-ck">
-            <input type="checkbox" class="ckbox" :checked="selEvents.has(e.id)" @change="toggleEvent(e.id)" />
-            <div class="rec-body">
-              <div class="t">{{ e.title }}</div>
-              <div class="d">{{ yrRange(e.year_start, e.year_end) }} · {{ roleOf(e.id) }}</div>
+          <template v-for="e in data.events" :key="'ce' + e.id">
+            <div v-if="editingEventId === e.id" class="ev-edit">
+              <div class="ap-field">
+                <label>事件标题</label>
+                <input v-model="editForm.title" class="ap-inp" placeholder="如 长平之战" />
+              </div>
+              <div class="ap-pair">
+                <div class="ap-field">
+                  <label>年份(可不填)</label>
+                  <input v-model="editForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
+                </div>
+                <div class="ap-field">
+                  <label>定位</label>
+                  <input v-model="editForm.role" class="ap-inp" placeholder="如 主将" />
+                </div>
+              </div>
+              <div class="ap-field">
+                <label>简述</label>
+                <textarea v-model="editForm.desc" class="ap-inp" placeholder="发生了什么…"></textarea>
+              </div>
+              <div class="f-row">
+                <button class="btn primary sm" :disabled="savingEvent" @click="saveEditEvent(e)">{{ savingEvent ? '保存中…' : '保存' }}</button>
+                <button class="btn ghost sm" @click="cancelEditEvent">取消</button>
+              </div>
             </div>
-          </div>
+            <div v-else class="rec-ck">
+              <input type="checkbox" class="ckbox" :checked="selEvents.has(e.id)" @change="toggleEvent(e.id)" />
+              <div class="rec-body">
+                <div class="t">{{ e.title }}</div>
+                <div class="d">{{ yrRange(e.year_start, e.year_end, e.year_approx) }} · {{ roleOf(e.id) }}</div>
+              </div>
+              <button type="button" class="mini-edit" title="编辑记录" @click="startEditEvent(e)">✎</button>
+            </div>
+          </template>
         </div>
         <span v-else class="empty">暂无记录</span>
         </section>
@@ -658,7 +758,7 @@ onBeforeUnmount(() => {
           <div class="recs">
             <div v-for="e in data.events" :key="'e' + e.id" class="rec" @click="emit('select-event', e.id)">
               <div class="t">{{ e.title }}</div>
-              <div class="d">{{ yrRange(e.year_start, e.year_end) }} · {{ roleOf(e.id) }}</div>
+              <div class="d">{{ yrRange(e.year_start, e.year_end, e.year_approx) }} · {{ roleOf(e.id) }}</div>
             </div>
           </div>
         </template>
@@ -693,7 +793,7 @@ onBeforeUnmount(() => {
           <div class="ap-pair">
             <div class="ap-field">
               <label>年份(可不填)</label>
-              <NumberStepper v-model="recForm.year" placeholder="如 –260" />
+              <input v-model="recForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
             </div>
             <div class="ap-field">
               <label>定位</label>

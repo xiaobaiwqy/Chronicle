@@ -5,8 +5,20 @@ export interface EventCreatePayload {
   description: string
   year_start: number | null
   year_end: number | null
+  year_approx?: boolean
   dynasty: string
   participants: { person_id: number; role: string }[]
+}
+
+export interface EventUpdatePayload {
+  title?: string
+  description?: string
+  year_start?: number | null
+  year_end?: number | null
+  year_approx?: boolean
+  dynasty?: string
+  location?: string | null
+  participants?: { person_id: number; role: string }[]
 }
 
 export function useEvents() {
@@ -22,9 +34,13 @@ export function useEvents() {
     return api<ChronicleEvent>('/events', { method: 'POST', body: payload })
   }
 
+  async function update(id: number, payload: EventUpdatePayload): Promise<ChronicleEvent> {
+    return api<ChronicleEvent>(`/events/${id}`, { method: 'PUT', body: payload })
+  }
+
   async function remove(id: number): Promise<void> {
     await api<void>(`/events/${id}`, { method: 'DELETE' })
   }
 
-  return { events, fetchAll, create, remove }
+  return { events, fetchAll, create, update, remove }
 }

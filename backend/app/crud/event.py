@@ -31,6 +31,7 @@ def create_event(db: Session, data: schemas.EventCreate) -> models.Event:
         description=data.description or "",
         year_start=data.year_start,
         year_end=data.year_end,
+        year_approx=data.year_approx,
         dynasty=data.dynasty or "",
         location=data.location,
         participants=[models.EventPerson(person_id=x.person_id, role=x.role) for x in data.participants],
@@ -42,11 +43,12 @@ def create_event(db: Session, data: schemas.EventCreate) -> models.Event:
 
 
 def update_event(db: Session, event: models.Event, data: schemas.EventUpdate) -> models.Event:
-    for field in ("title", "description", "year_start", "year_end", "dynasty", "location"):
-        value = getattr(data, field)
-        if value is not None:
-            setattr(event, field, value)
-    if data.participants is not None:
+    # 用 model_fields_set 区分「未提交」与「显式置空」:前者保持原值,后者允许清空(如年份设为 null)。
+    provided = data.model_fields_set
+    for field in ("title", "description", "year_start", "year_end", "year_approx", "dynasty", "location"):
+        if field in provided:
+            setattr(event, field, getattr(data, field))
+    if "participants" in provided and data.participants is not None:
         event.participants.clear()
         event.participants.extend(
             [models.EventPerson(person_id=x.person_id, role=x.role) for x in data.participants]

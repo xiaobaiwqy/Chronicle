@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Person, SelectOption } from '~/types/chronicle'
-import { dynastyColor, dynastyOptions } from '~/utils/dynasty'
+import { dynastyColor, dynastyOptions, parseYear } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean; persons: Person[] }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
@@ -273,7 +273,7 @@ async function submitEvent() {
     toast.show('请填写事件标题')
     return
   }
-  const y = eForm.year === '' ? null : Number(eForm.year)
+  const { year: y, approx } = parseYear(eForm.year)
   submitting.value = true
   try {
     await createEvent({
@@ -281,6 +281,7 @@ async function submitEvent() {
       description: eForm.desc.trim(),
       year_start: y,
       year_end: y,
+      year_approx: approx,
       dynasty: eventDynasty.value,
       participants: [{ person_id: eForm.person, role: eForm.role.trim() || '参与' }],
     })
@@ -485,8 +486,8 @@ async function submitEvent() {
             </div>
             <div class="ap-field">
               <label>年份</label>
-              <NumberStepper v-model="eForm.year" placeholder="如 –260" />
-              <div class="ap-hint">年份可不填;负数表示公元前,如 –260 = 前 260 年</div>
+              <input v-model="eForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
+              <div class="ap-hint">负数表示公元前,如 –260 = 前 260 年;加 ~ 或「约」表示约略年份</div>
             </div>
             <div class="ap-field">
               <label>简述</label>

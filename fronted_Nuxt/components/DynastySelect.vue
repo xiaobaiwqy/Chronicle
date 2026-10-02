@@ -91,6 +91,9 @@ async function confirmAdd() {
 const editingId = ref<number | null>(null)
 const editName = ref('')
 const editColor = ref('')
+// 删除二次确认:首击进入待确认,再击才真正删除;3 秒无操作自动复位
+const confirmDelId = ref<number | null>(null)
+let confirmDelTimer: ReturnType<typeof setTimeout> | null = null
 
 function startEdit(d: { id: number; name: string; color: string }) {
   editingId.value = d.id
@@ -121,6 +124,13 @@ async function confirmEdit() {
 }
 
 async function removeDynasty(d: { id: number; name: string }) {
+  if (confirmDelId.value !== d.id) {
+    confirmDelId.value = d.id
+    if (confirmDelTimer) clearTimeout(confirmDelTimer)
+    confirmDelTimer = setTimeout(() => (confirmDelId.value = null), 3000)
+    return
+  }
+  confirmDelId.value = null
   try {
     await remove(d.id)
     // 若当前筛选色恰好是被删朝代的颜色,一并清除筛选
@@ -253,8 +263,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="g-row-btn" title="编辑" @click.stop="startEdit(d)">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 3 22l1.5-4.5Z" /></svg>
           </button>
-          <button class="g-row-btn g-del" title="删除" @click.stop="removeDynasty(d)">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          <button class="g-row-btn g-del" :class="{ on: confirmDelId === d.id }" :title="confirmDelId === d.id ? '再次点击确认删除' : '删除'" @click.stop="removeDynasty(d)">
+            <template v-if="confirmDelId === d.id">确认?</template>
+            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </template>
       </div>

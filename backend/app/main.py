@@ -73,6 +73,12 @@ async def lifespan(_: FastAPI):
                 conn.execute(text("DROP TABLE events"))
                 conn.execute(text("ALTER TABLE events_new RENAME TO events"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_id ON events (id)"))
+    # 轻量迁移:events 表补 year_approx 列(年份"约"标记)。
+    if "events" in inspector.get_table_names():
+        event_cols = {c["name"] for c in inspector.get_columns("events")}
+        if "year_approx" not in event_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE events ADD COLUMN year_approx BOOLEAN NOT NULL DEFAULT 0"))
     yield
 
 

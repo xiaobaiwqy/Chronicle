@@ -103,20 +103,25 @@ function position() {
   const maxH = 320
   const spaceBelow = window.innerHeight - rect.bottom - 8
   const spaceAbove = rect.top - 8
-  let top = rect.bottom + 6
-  let maxHeight = maxH
   if (spaceBelow < maxH && spaceAbove > spaceBelow) {
-    top = rect.top - 6 - Math.min(maxH, spaceAbove)
-    maxHeight = Math.min(maxH, spaceAbove)
+    // 下方空间不足且上方更充裕时,向上弹出:菜单底边紧贴触发框上方 6px
+    menuStyle.value = {
+      position: 'fixed',
+      top: 'auto',
+      bottom: `${window.innerHeight - rect.top + 6}px`,
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+      maxHeight: `${Math.min(maxH, spaceAbove)}px`,
+    }
   } else {
-    maxHeight = Math.min(maxH, spaceBelow)
-  }
-  menuStyle.value = {
-    position: 'fixed',
-    top: `${top}px`,
-    left: `${rect.left}px`,
-    width: `${rect.width}px`,
-    maxHeight: `${maxHeight}px`,
+    menuStyle.value = {
+      position: 'fixed',
+      top: `${rect.bottom + 6}px`,
+      bottom: 'auto',
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+      maxHeight: `${Math.min(maxH, spaceBelow)}px`,
+    }
   }
 }
 

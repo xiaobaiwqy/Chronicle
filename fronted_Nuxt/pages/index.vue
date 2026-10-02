@@ -7,6 +7,7 @@ const personDetail = ref<PersonDetail | null>(null)
 const selectedEventId = ref<number | null>(null)
 const dimmedRelationIds = ref<number[]>([])
 const addOpen = ref(false)
+const libraryOpen = ref(false)
 const dynastyFilter = ref<string | null>(null)
 const graphRef = ref<{
   focusPerson: (id: number) => void
@@ -153,6 +154,18 @@ async function onDeleted() {
   }
 }
 
+// 库界面增删改后:统一刷新人物/关系网/事件;若当前详情人物被删则关闭抽屉
+async function onLibraryChanged() {
+  try {
+    await Promise.all([fetchPersons(), fetchGraph(), fetchEvents()])
+    if (selectedPersonId.value != null && !persons.value.some((p) => p.id === selectedPersonId.value)) {
+      closePerson()
+    }
+  } catch (err) {
+    console.error('[Chronicle] 库刷新失败', err)
+  }
+}
+
 function setView(v: 'graph' | 'timeline') {
   view.value = v
   closeEvent()
@@ -164,6 +177,7 @@ function onKeydown(e: KeyboardEvent) {
     closePerson()
     closeEvent()
     addOpen.value = false
+    libraryOpen.value = false
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
@@ -206,6 +220,12 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <button class="lib-btn" title="人物库 / 事件库" @click="libraryOpen = true">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 1-2-2z" />
+      <path d="M18 3h-5v18h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+    </svg>
+  </button>
   <DynastySelect v-model="dynastyFilter" :persons="persons" />
   <SideRail :model-value="view" @update:model-value="setView" />
   <SearchBar
@@ -235,6 +255,7 @@ onBeforeUnmount(() => {
     @deleted="onDeleted"
   />
   <AddPanel :open="addOpen" :persons="persons" @close="addOpen = false" @saved="onAdded" />
+  <LibraryView :open="libraryOpen" @close="libraryOpen = false" @changed="onLibraryChanged" />
   <EventPopover :event="selectedEvent" @close="closeEvent" @select-person="openPerson" />
   <div class="toast" :class="{ show: toastVisible }"><span>{{ toastMessage }}</span></div>
 </template>
