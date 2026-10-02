@@ -31,6 +31,7 @@
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.reference",
+      "artifactName": "Chronicle-${version}-${arch}.${ext}",
       "target": [
         "dmg",
         "zip"
