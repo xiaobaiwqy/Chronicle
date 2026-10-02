@@ -7,7 +7,7 @@
 #   - backend/.venv (FastAPI + pyinstaller)
 #   - desktop/node_modules (electron + electron-builder)
 #
-# App 图标源文件:backend/local_data/icons/星图_朱砂.png(自动转成 .icns)
+# App 图标源文件:backend/local_data/icons/星图_朱砂_圆角.png(自动转成 .icns)
 # 注:electron-builder 无开发者证书时跳过签名,故第 5 步补一次正确的 ad-hoc 签名,
 #     否则下载后会被 Gatekeeper 误判「已损坏」。
 set -euo pipefail
@@ -38,7 +38,7 @@ echo "==> 2/5 打包后端 (PyInstaller --onedir)"
     run.py )
 
 echo "==> 3/5 生成 App 图标 (.icns)"
-ICON_PNG="$BACKEND/local_data/icons/星图_朱砂.png"
+ICON_PNG="$BACKEND/local_data/icons/星图_朱砂_圆角.png"
 ICONSET="$DESKTOP/build/icon.iconset"
 rm -rf "$ICONSET" && mkdir -p "$ICONSET"
 for spec in \
