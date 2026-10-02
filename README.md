@@ -185,8 +185,3 @@ CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
 | `relations` | id, from_person_id, to_person_id, label, directed(是否单向) |
 | `custom_dynasties` | id, name, color |
 
-## 七、朝代配色(全局视觉主干)
-
-```
-春秋 #7d7aff · 战国 #0a84ff · 秦 #30d158 · 汉 #ff9f0a · 赵 #d4b800 · 燕 #ff6482 · 默认 #8e8e93
-```
