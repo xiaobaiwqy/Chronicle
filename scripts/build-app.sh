@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键构建「人物志」桌面 App(macOS arm64)。
-# 产出:desktop/dist/Chronicle-0.1.0-arm64.dmg / .zip(内含人物志.app)
+# 产出:desktop/dist/Chronicle-1.0.0-arm64.dmg / .zip(内含人物志.app)
 #
 # 依赖均已本地安装、不污染系统环境:
 #   - fronted_Nuxt/node_modules (Nuxt 3)

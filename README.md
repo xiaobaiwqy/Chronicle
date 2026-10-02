@@ -20,7 +20,7 @@ project-root/
 │   ├── local_data/              # 运行时数据
 │   │   ├── sqlite/              #   chronicle.db(自动生成,不入库)
 │   │   ├── avatars/             #   默认头像库(按人物名命名,如 关羽.jpg)
-│   │   └── icons/               #   App 图标(当前用 星图_朱砂.png,打包时自动转 .icns)
+│   │   └── icons/               #   App 图标(当前用 星图_朱砂_圆角.png,打包时自动转 .icns)
 │   └── app/
 │       ├── main.py              # 入口:挂路由、CORS、自动建表 + 轻量迁移、托管前端静态文件(打包模式)
 │       ├── core/config.py       # DB 路径、端口;区分开发/打包两种模式
@@ -36,7 +36,7 @@ project-root/
 │   ├── app.vue
 │   ├── assets/css/main.css      # 全局样式
 │   ├── composables/             # useBackendApi / usePersons / useEvents / useRelations / useDynasties / useAvatars / useToast
-│   ├── components/              # GraphView / TimelineView / PersonDrawer / EventPopover / SideRail / SearchBar / AddPanel / AppSelect / AppMultiSelect 等
+│   ├── components/              # GraphView / TimelineView / PersonDrawer / EventPopover / SideRail / SearchBar / AddPanel / LibraryView / AppSelect / AppMultiSelect 等
 │   ├── pages/index.vue          # 单页:内部切换 graph / timeline 两个视图
 │   ├── types/chronicle.ts       # 数据形状
 │   └── utils/dynasty.ts         # 朝代配色 / 年份格式化
@@ -55,7 +55,7 @@ project-root/
 
 ### 方式 A:桌面 App(推荐,无需任何环境)
 
-1. 从 GitHub Releases 下载 `人物志-*.dmg`,双击挂载,把 `人物志.app` 拖进「应用程序」。
+1. 从 GitHub Releases 下载 `Chronicle-*-arm64.dmg`,双击挂载,把 `人物志.app` 拖进「应用程序」。
 2. 点击图标直接打开,和普通 macOS 软件一样。
 
 > **两点说明**
@@ -132,14 +132,14 @@ CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
 产物在 `desktop/dist/`:
 
 - `mac-arm64/人物志.app` — 直接可用的 App
-- `人物志-*.dmg` — 分发用安装镜像
-- `人物志-*-mac.zip` — 免安装压缩包
+- `Chronicle-${版本}-arm64.dmg`(如 `Chronicle-1.0.0-arm64.dmg`)— 分发用安装镜像
+- `Chronicle-${版本}-arm64.zip` — 免安装压缩包
 
 > **环境完全隔离**:后端由 PyInstaller 打包为独立可执行文件(含 Python 运行时),前端打包为静态文件塞进后端;Electron / electron-builder 装在 `desktop/node_modules`(本地)。全程不写系统 Python、不做全局 npm 安装。
 
 ### 发布到 GitHub
 
-把 `人物志-*.dmg` 上传到 **GitHub Releases**(仓库 → Releases → Create a new release → 拖入 dmg),不要直接 commit 进 git 仓库(有 100MB 单文件限制,也会撑大历史)。Release 支持单文件最大 2GB。
+把 `Chronicle-*-arm64.dmg` 上传到 **GitHub Releases**(仓库 → Releases → Create a new release → 拖入 dmg),不要直接 commit 进 git 仓库(有 100MB 单文件限制,也会撑大历史)。Release 支持单文件最大 2GB。
 
 > 想让别人「双击即开、零提示」,需用 Apple Developer ID($99/年)签名 + 公证;不签名的话,别人右键「打开」一次即可。
 
@@ -149,8 +149,10 @@ CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
 
 - 默认进入**关系网**(深色 3D 宇宙):拖动旋转、滚轮缩放、悬停高亮、点击节点打开右侧人物抽屉并高亮其一度关系;左上角为朝代颜色图例。
 - 左侧竖向切换栏(🕸 关系网 / ⟶ 时间线)切换视图;时间线为浅色横向滚轴,事件卡片上下交错,右下角 ◍ 查看朝代色卡。
-- 右下角「+」打开添加面板,录入人物 / 关系 / 事件。
-- 右上角搜索框搜人物/事件(`⌘K` / `Ctrl+K` 聚焦)。
+- **时间线**按真实年份定位事件;同一时间点的多个事件上下错开,事件密集处放大后该时间点会展开成一段可标注年份的区间,逐个容纳事件;点击朝代块平滑聚焦该段。
+- 左上角「书册」按钮打开**库**视图,集中管理人物库与事件库,支持批量增删改与朝代/关键字筛选。
+- 右下角「+」打开添加面板,录入人物 / 关系 / 事件;人物朝代/国家分**主**(单选,决定颜色)与**次**(多选,补充归属);年份支持 `~` 前缀表示约略年份。
+- 右上角搜索框搜人物/事件/朝代/关系(`⌘K` / `Ctrl+K` 聚焦)。
 - `Esc` 关闭抽屉 / 浮卡。
 
 ---
@@ -180,7 +182,7 @@ CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
 | 表 | 字段 |
 |---|---|
 | `persons` | id, name, dynasty, secondary_dynasties(JSON), birth_year, death_year, summary, identity, color, avatar |
-| `events` | id, title, description, year_start, year_end, dynasty, location |
+| `events` | id, title, description, year_start, year_end, year_approx(约略年份), dynasty, location |
 | `event_persons` | id, event_id, person_id, role(如"主将/主谋/被害") |
 | `relations` | id, from_person_id, to_person_id, label, directed(是否单向) |
 | `custom_dynasties` | id, name, color |
