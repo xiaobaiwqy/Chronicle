@@ -53,10 +53,18 @@ def update_person(db: Session, person: models.Person, data: schemas.PersonUpdate
 
 
 def delete_person(db: Session, person: models.Person) -> None:
-    """删除人物,并级联清理关联数据:事件参与记录、以该人物为任一端的关系。
+    """删除人物,并级联清理关联数据:事件参与记录、以该人物为任一端的关系,
+    以及因此变成「无参与者」的空事件。
 
     先显式删除关联行,避免留下脏数据;再删除人物本身。
     """
+    # 记录该人物参与过的事件,用于清理删除后没有剩余参与者的空事件
+    involved_event_ids = [
+        eid
+        for (eid,) in db.query(models.EventPerson.event_id)
+        .filter(models.EventPerson.person_id == person.id)
+        .all()
+    ]
     db.query(models.EventPerson).filter(
         models.EventPerson.person_id == person.id
     ).delete(synchronize_session=False)
@@ -64,5 +72,14 @@ def delete_person(db: Session, person: models.Person) -> None:
         (models.Relation.from_person_id == person.id)
         | (models.Relation.to_person_id == person.id)
     ).delete(synchronize_session=False)
+    # 删除因此变为无参与者的空事件(历史事件只在仍有参与者时保留)
+    for eid in involved_event_ids:
+        remaining = db.query(models.EventPerson).filter(
+            models.EventPerson.event_id == eid
+        ).count()
+        if remaining == 0:
+            orphan = db.query(models.Event).filter(models.Event.id == eid).first()
+            if orphan is not None:
+                db.delete(orphan)
     db.delete(person)
     db.commit()

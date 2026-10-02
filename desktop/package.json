@@ -1,0 +1,40 @@
+{
+  "name": "chronicle-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "人物志桌面端(Electron 外壳 + PyInstaller 打包的 FastAPI 后端)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.chronicle.app",
+    "productName": "人物志",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/chronicle-backend",
+        "to": "backend/chronicle-backend"
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.reference",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
+  }
+}

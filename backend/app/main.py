@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401  确保模型注册到 Base.metadata
 from app.api.v1.router import api_router
@@ -65,9 +66,14 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 
-@app.get("/")
-def root():
-    return {"app": "Chronicle 人物志", "docs": "/docs", "api": "/api/v1"}
+# 打包模式:托管前端静态文件(单页应用),挂到根路径;开发模式:根路径返回应用信息
+if config.STATIC_DIR and config.STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(config.STATIC_DIR), html=True), name="frontend")
+else:
+
+    @app.get("/")
+    def root():
+        return {"app": "Chronicle 人物志", "docs": "/docs", "api": "/api/v1"}
 
 
 if __name__ == "__main__":

@@ -7,12 +7,18 @@ __pycache__/
 *.py[cod]
 backend/local_data/sqlite/
 *.db
+backend/build/
 
 # Node / 前端
 fronted_Nuxt/node_modules/
 fronted_Nuxt/.nuxt/
-fronted_Nuxt/dist/
+fronted_Nuxt/dist
 fronted_Nuxt/.output/
+
+# 桌面端 (Electron 打包产物与依赖)
+desktop/node_modules/
+desktop/build/
+desktop/dist/
 
 # 环境变量
 .env
