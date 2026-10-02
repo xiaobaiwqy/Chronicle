@@ -345,7 +345,8 @@ function focusBand(seg: { s: number; e: number; w: number; x0: number; x1: numbe
     focusedS = seg.s
     const baseW = seg.w / zoom.value
     const targetZoom = Math.min(zoomMax.value, Math.max(ZOOM_MIN, vw / baseW))
-    animateTo(targetZoom, () => (seg.x0 + seg.x1) / 2 - vw / 2)
+    // 用分块起止年的实时像素(X 随当前 zoom 逐帧重算)作为滚动目标,保证聚焦跟随缩放、不漂移到左端
+    animateTo(targetZoom, () => (X(seg.s) + X(seg.e)) / 2 - vw / 2)
   }
 }
 
