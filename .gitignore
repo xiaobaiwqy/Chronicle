@@ -1,0 +1,19 @@
+# OS
+.DS_Store
+
+# Python / 后端
+backend/.venv/
+__pycache__/
+*.py[cod]
+backend/local_data/sqlite/
+*.db
+
+# Node / 前端
+fronted_Nuxt/node_modules/
+fronted_Nuxt/.nuxt/
+fronted_Nuxt/dist/
+fronted_Nuxt/.output/
+
+# 环境变量
+.env
+.env.local
