@@ -339,15 +339,11 @@ const recForm = reactive({ title: '', year: '', role: '', desc: '' })
 async function submitRecord() {
   const d = data.value
   if (!d) return
-  const y = Number(recForm.year)
   if (!recForm.title.trim()) {
     toast.show('请填写事件标题')
     return
   }
-  if (recForm.year === '' || Number.isNaN(y)) {
-    toast.show('请填写年份(负数表示公元前)')
-    return
-  }
+  const y = recForm.year === '' ? null : Number(recForm.year)
   submitting.value = true
   try {
     await create({
@@ -696,7 +692,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ap-pair">
             <div class="ap-field">
-              <label>年份</label>
+              <label>年份(可不填)</label>
               <NumberStepper v-model="recForm.year" placeholder="如 –260" />
             </div>
             <div class="ap-field">

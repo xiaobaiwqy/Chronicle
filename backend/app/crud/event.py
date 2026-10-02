@@ -7,7 +7,9 @@ from app import models, schemas
 
 
 def list_events(db: Session):
-    return db.query(models.Event).order_by(models.Event.year_start, models.Event.id).all()
+    return db.query(models.Event).order_by(
+        models.Event.year_start.is_(None), models.Event.year_start, models.Event.id
+    ).all()
 
 
 def get_event(db: Session, event_id: int):
@@ -20,7 +22,7 @@ def list_timeline(db: Session, from_year: Optional[int] = None, to_year: Optiona
         q = q.filter(models.Event.year_start >= from_year)
     if to_year is not None:
         q = q.filter(models.Event.year_start <= to_year)
-    return q.order_by(models.Event.year_start, models.Event.id).all()
+    return q.order_by(models.Event.year_start.is_(None), models.Event.year_start, models.Event.id).all()
 
 
 def create_event(db: Session, data: schemas.EventCreate) -> models.Event:

@@ -73,7 +73,7 @@ def person_detail_to_schema(db: Session, person: models.Person) -> schemas.Perso
         db.query(models.Event)
         .join(models.EventPerson)
         .filter(models.EventPerson.person_id == person.id)
-        .order_by(models.Event.year_start, models.Event.id)
+        .order_by(models.Event.year_start.is_(None), models.Event.year_start, models.Event.id)
         .all()
     )
     relations = (

@@ -50,6 +50,29 @@ async def lifespan(_: FastAPI):
             if legacy in cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE persons DROP COLUMN {legacy}"))
+    # 轻量迁移:让 events 表的 year_start/year_end 允许为空(事件可不填年份)。
+    # SQLite 无法直接 ALTER COLUMN 去掉 NOT NULL,故重建表(列已存在且非空时执行一次)。
+    if "events" in inspector.get_table_names():
+        event_cols = {c["name"]: c for c in inspector.get_columns("events")}
+        if event_cols.get("year_start", {}).get("nullable", True) is False:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE TABLE events_new ("
+                    "id INTEGER NOT NULL PRIMARY KEY, "
+                    "title VARCHAR NOT NULL, "
+                    "description TEXT DEFAULT '', "
+                    "year_start INTEGER, "
+                    "year_end INTEGER, "
+                    "dynasty VARCHAR DEFAULT '', "
+                    "location VARCHAR)"
+                ))
+                conn.execute(text(
+                    "INSERT INTO events_new (id, title, description, year_start, year_end, dynasty, location) "
+                    "SELECT id, title, description, year_start, year_end, dynasty, location FROM events"
+                ))
+                conn.execute(text("DROP TABLE events"))
+                conn.execute(text("ALTER TABLE events_new RENAME TO events"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_id ON events (id)"))
     yield
 
 

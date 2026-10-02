@@ -11,8 +11,8 @@ class Event(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
     description = Column(Text, default="")
-    year_start = Column(Integer, nullable=False)
-    year_end = Column(Integer, nullable=False)
+    year_start = Column(Integer, nullable=True)
+    year_end = Column(Integer, nullable=True)
     dynasty = Column(String, default="")
     location = Column(String, nullable=True)
 

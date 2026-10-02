@@ -29,16 +29,27 @@ function syncScroll() {
   viewW.value = wrapEl.value.clientWidth
 }
 
-// 事件按朝代筛选(左上角"朝代/国家"选框):未选时显示全部
-const filteredEvents = computed(() => {
-  if (!props.dynastyFilter) return props.events
-  return props.events.filter((e) => dynastyColor(e.dynasty) === props.dynastyFilter)
+// 事件按朝代筛选(左上角"朝代/国家"选框):未选时显示全部。
+// 事件按是否有年份分两组:有年份的进时间轴,无年份的集中到右侧"不详"区块。
+type DatedEvent = ChronicleEvent & { year_start: number }
+function isDated(e: ChronicleEvent): e is DatedEvent {
+  return e.year_start != null
+}
+const datedEvents = computed(() => props.events.filter(isDated))
+const undatedEvents = computed(() => props.events.filter((e) => !isDated(e)))
+const filteredDated = computed(() => {
+  if (!props.dynastyFilter) return datedEvents.value
+  return datedEvents.value.filter((e) => dynastyColor(e.dynasty) === props.dynastyFilter)
+})
+const filteredUndated = computed(() => {
+  if (!props.dynastyFilter) return undatedEvents.value
+  return undatedEvents.value.filter((e) => dynastyColor(e.dynasty) === props.dynastyFilter)
 })
 
 // 自定义朝代分块:事件年份落在预设分块之外时,按朝代聚合生成新分块(用户新增事件自动扩展时间线)
 const customBands = computed(() => {
   const groups = new Map<string, { min: number; max: number }>()
-  for (const e of props.events) {
+  for (const e of datedEvents.value) {
     const y = e.year_start
     if (TIMELINE_BANDS.some((b) => y >= b.s && y <= b.e)) continue
     const lo = Math.min(y, e.year_end ?? y)
@@ -69,7 +80,7 @@ function computeLayout(z: number) {
   let x = PAD
   const items = allBands.value.map((b) => {
     const span = Math.max(1, b.e - b.s)
-    const evs = props.events.filter((e) => e.year_start >= b.s && e.year_start <= b.e).length
+    const evs = datedEvents.value.filter((e) => e.year_start >= b.s && e.year_start <= b.e).length
     const base = span * K_SPAN + evs * K_EVENT
     const w = Math.max(NAME_W * b.name.length + NAME_PAD, base * z)
     const seg = { ...b, w, x0: x, x1: x + w, count: evs }
@@ -80,6 +91,29 @@ function computeLayout(z: number) {
 }
 
 const layout = computed(() => computeLayout(zoom.value))
+
+// —— 无年份事件:"不详"区块固定在时间轴最右端 ——
+const undatedBand = computed(() => {
+  const count = filteredUndated.value.length
+  if (!count) return { x0: 0, x1: 0, w: 0, count }
+  const items = layout.value.items
+  const x0 = (items.length ? items[items.length - 1].x1 : PAD) + 40
+  const w = Math.max(NAME_W * 2 + NAME_PAD, count * (CARD_W + CARD_GAP) + PAD)
+  return { x0, x1: x0 + w, w, count }
+})
+const totalW = computed(() => Math.max(layout.value.totalW, undatedBand.value.x1 + PAD))
+
+const undatedCards = computed(() => {
+  const band = undatedBand.value
+  if (!band.count) return []
+  const AXIS = H.value / 2
+  return filteredUndated.value.map((e, i) => {
+    const x = band.x0 + PAD / 2 + i * (CARD_W + CARD_GAP)
+    const h = 50 + (i % 3) * 36
+    const above = i % 2 === 0
+    return { e, color: dynastyColor(e.dynasty), above, h, x, top: above ? AXIS - h - 62 : AXIS + 13 }
+  })
+})
 
 // 视口内可见的分块数:放大到只剩一个朝代块时,关闭悬浮发光
 const singleBand = computed(() => {
@@ -112,7 +146,7 @@ const ticks = computed(() => {
   const items = layout.value.items
   for (const seg of items) years.add(seg.s)
   if (items.length) years.add(items[items.length - 1].e)
-  for (const e of filteredEvents.value) years.add(e.year_start)
+  for (const e of filteredDated.value) years.add(e.year_start)
   const sorted = [...years].sort((a, b) => a - b)
   const out: number[] = []
   for (const y of sorted) {
@@ -125,7 +159,7 @@ const ticks = computed(() => {
 // 事件卡片:按年份排序,上下两 lane 贪心防重叠——放不下的隐藏(LOD)。
 // 放大时分块拉宽、间距变大,更多事件能放下,从而展示更多细节事件。
 const cards = computed(() => {
-  const sorted = [...filteredEvents.value].sort((a, b) => a.year_start - b.year_start)
+  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start)
   const AXIS = H.value / 2
   let lastAbove = -Infinity
   let lastBelow = -Infinity
@@ -150,7 +184,7 @@ const cards = computed(() => {
 // 让当前筛选下所有事件卡片都能放下所需的最小 zoom(动态上限依据)。
 // 逐次翻倍扩张再二分收敛;同年事件上下两 lane 各最多一个,极端密集时上限随间距成比例拉高。
 const fitAllZoom = computed(() => {
-  const sorted = [...filteredEvents.value].sort((a, b) => a.year_start - b.year_start)
+  const sorted = [...filteredDated.value].sort((a, b) => a.year_start - b.year_start)
   const total = sorted.length
   if (total < 2) return 1
   const canAll = (z: number) => {
@@ -259,7 +293,7 @@ function focusBand(seg: { s: number; e: number; w: number }) {
   if (focusedS === seg.s) {
     // 再次点击:恢复全局视图(居中整条时间线),不裁剪任何区域
     focusedS = null
-    animateTo(1, () => (layout.value.totalW - vw) / 2)
+    animateTo(1, () => (totalW.value - vw) / 2)
   } else {
     focusedS = seg.s
     const baseW = seg.w / zoom.value
@@ -275,7 +309,11 @@ function focusEvent(id: number) {
   if (!e) return
   const vw = wrapEl.value.clientWidth
   const targetZoom = Math.min(zoomMax.value, Math.max(zoom.value, fitAllZoom.value))
-  animateTo(targetZoom, () => X(e.year_start) - vw / 2)
+  if (e.year_start == null) {
+    animateTo(targetZoom, () => undatedBand.value.x0 - vw / 3)
+  } else {
+    animateTo(targetZoom, () => X(e.year_start) - vw / 2)
+  }
 }
 
 defineExpose({ focusEvent })
@@ -306,8 +344,10 @@ watch(
     H.value = wrapEl.value?.clientHeight || 500
     syncScroll()
     if (!scrolledOnce && wrapEl.value) {
-      const first = [...props.events].sort((a, b) => a.year_start - b.year_start)[0]
-      wrapEl.value.scrollLeft = first ? X(first.year_start) - 200 : 0
+      const first = [...datedEvents.value].sort((a, b) => a.year_start - b.year_start)[0]
+      if (first) wrapEl.value.scrollLeft = X(first.year_start) - 200
+      else if (undatedBand.value.count) wrapEl.value.scrollLeft = undatedBand.value.x0 - 100
+      else wrapEl.value.scrollLeft = 0
       scrolledOnce = true
       syncScroll()
     }
@@ -324,7 +364,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tl-wrap" :class="{ single: singleBand }" ref="wrapEl">
-    <div class="tl-canvas" :style="{ width: layout.totalW + 'px' }">
+    <div class="tl-canvas" :style="{ width: totalW + 'px' }">
       <div
         v-for="d in layout.items"
         :key="d.name + d.s"
@@ -334,6 +374,13 @@ onBeforeUnmount(() => {
       >
         <div class="dyn-lab"><span class="dyn-name">{{ d.name }}</span><span class="dyn-yrs">{{ yrFmt(d.s) }}–{{ yrFmt(d.e) }}</span><span class="dyn-cnt">当前记录 {{ d.count }} 事件</span></div>
       </div>
+      <div
+        v-if="undatedBand.count"
+        class="dyn-band"
+        :style="{ left: undatedBand.x0 + 'px', width: undatedBand.w + 'px', '--dc': '#8e8e93' }"
+      >
+        <div class="dyn-lab"><span class="dyn-name">不详</span><span class="dyn-yrs">未定年</span><span class="dyn-cnt">当前记录 {{ undatedBand.count }} 事件</span></div>
+      </div>
       <div class="tl-axis"></div>
       <div v-for="y in ticks" :key="y" class="tl-tick" :style="{ left: X(y) + 'px' }">
         <span>{{ yrFmt(y) }}</span>
@@ -341,6 +388,31 @@ onBeforeUnmount(() => {
       <div
         v-for="c in cards"
         :key="c.e.id"
+        class="tl-ev"
+        :class="{ sel: c.e.id === selectedEventId }"
+        :style="{ left: c.x + 'px', top: c.top + 'px', '--dc': c.color }"
+        @click.stop="onCard(c.e.id)"
+      >
+        <template v-if="c.above">
+          <div class="bx">
+            <div class="t">{{ c.e.title }}</div>
+            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
+          </div>
+          <div class="stem" :style="{ height: c.h + 'px' }"></div>
+          <div class="nd"></div>
+        </template>
+        <template v-else>
+          <div class="nd"></div>
+          <div class="stem" :style="{ height: c.h + 'px' }"></div>
+          <div class="bx">
+            <div class="t">{{ c.e.title }}</div>
+            <div class="who">{{ yrRange(c.e.year_start, c.e.year_end) }}</div>
+          </div>
+        </template>
+      </div>
+      <div
+        v-for="c in undatedCards"
+        :key="'u' + c.e.id"
         class="tl-ev"
         :class="{ sel: c.e.id === selectedEventId }"
         :style="{ left: c.x + 'px', top: c.top + 'px', '--dc': c.color }"

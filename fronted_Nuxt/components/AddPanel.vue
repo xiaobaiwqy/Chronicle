@@ -273,11 +273,7 @@ async function submitEvent() {
     toast.show('请填写事件标题')
     return
   }
-  const y = Number(eForm.year)
-  if (eForm.year === '' || Number.isNaN(y)) {
-    toast.show('请填写年份(负数表示公元前)')
-    return
-  }
+  const y = eForm.year === '' ? null : Number(eForm.year)
   submitting.value = true
   try {
     await createEvent({
@@ -490,7 +486,7 @@ async function submitEvent() {
             <div class="ap-field">
               <label>年份</label>
               <NumberStepper v-model="eForm.year" placeholder="如 –260" />
-              <div class="ap-hint">年份用负数表示公元前,如 –260 = 前 260 年</div>
+              <div class="ap-hint">年份可不填;负数表示公元前,如 –260 = 前 260 年</div>
             </div>
             <div class="ap-field">
               <label>简述</label>

@@ -193,9 +193,9 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
   mask-image:linear-gradient(to bottom,#000 60%,transparent 100%)}
 .hero .dot{position:absolute;border-radius:50%;background:rgba(255,255,255,.7);box-shadow:0 0 8px rgba(255,255,255,.85);z-index:2}
 .hero .top{position:absolute;top:14px;right:14px;z-index:3;display:flex;gap:8px}
-.hero .top button{width:32px;height:32px;border:none;background:transparent;border-radius:50%;color:rgba(255,255,255,.5);
+.hero .top button{width:32px;height:32px;border:none;background:rgba(0,0,0,.22);border-radius:50%;color:rgba(255,255,255,.85);
   font-size:16px;cursor:pointer;display:grid;place-items:center;padding:0;transition:all .16s}
-.hero .top button:hover{color:#fff;background:rgba(0,0,0,.32)}
+.hero .top button:hover{color:#fff;background:rgba(0,0,0,.4)}
 .hero .ttl{position:absolute;left:20px;right:20px;bottom:16px;z-index:2;color:#fff}
 .hero .ttl .name{font-size:38px;font-weight:700;letter-spacing:.04em;
   text-shadow:0 2px 14px rgba(0,0,0,.35),0 0 26px rgba(0,0,0,.16)}

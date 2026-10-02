@@ -22,8 +22,8 @@ class EventParticipant(BaseModel):
 class EventBase(BaseModel):
     title: str
     description: str = ""
-    year_start: int
-    year_end: int
+    year_start: Optional[int] = None
+    year_end: Optional[int] = None
     dynasty: str = ""
     location: Optional[str] = None
 

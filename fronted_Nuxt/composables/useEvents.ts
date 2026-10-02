@@ -3,8 +3,8 @@ import type { ChronicleEvent } from '~/types/chronicle'
 export interface EventCreatePayload {
   title: string
   description: string
-  year_start: number
-  year_end: number
+  year_start: number | null
+  year_end: number | null
   dynasty: string
   participants: { person_id: number; role: string }[]
 }
