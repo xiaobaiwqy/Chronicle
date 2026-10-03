@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 class CustomDynastyBase(BaseModel):
     name: str
     color: str = ""
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 class CustomDynastyCreate(CustomDynastyBase):
@@ -16,6 +18,8 @@ class CustomDynastyCreate(CustomDynastyBase):
 class CustomDynastyUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 class CustomDynasty(CustomDynastyBase):

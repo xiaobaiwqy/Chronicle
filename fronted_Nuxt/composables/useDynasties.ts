@@ -4,11 +4,15 @@ import { DYNASTY_CATALOG, hashColor, setCustomDynastyColors } from '~/utils/dyna
 export interface CustomDynastyCreatePayload {
   name: string
   color: string
+  start_year?: number | null
+  end_year?: number | null
 }
 
 export interface CustomDynastyUpdatePayload {
   name?: string
   color?: string
+  start_year?: number | null
+  end_year?: number | null
 }
 
 export function useDynasties() {

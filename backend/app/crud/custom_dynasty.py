@@ -17,7 +17,12 @@ def get_custom_dynasty_by_name(db: Session, name: str):
 
 
 def create_custom_dynasty(db: Session, data: schemas.CustomDynastyCreate) -> models.CustomDynasty:
-    dynasty = models.CustomDynasty(name=data.name, color=data.color or "")
+    dynasty = models.CustomDynasty(
+        name=data.name,
+        color=data.color or "",
+        start_year=data.start_year,
+        end_year=data.end_year,
+    )
     db.add(dynasty)
     db.commit()
     db.refresh(dynasty)
@@ -29,6 +34,11 @@ def update_custom_dynasty(db: Session, dynasty: models.CustomDynasty, data: sche
         dynasty.name = data.name.strip()
     if data.color is not None:
         dynasty.color = data.color
+    # 用 model_fields_set 判断字段是否显式提供,以便支持把年份清空为 null
+    if "start_year" in data.model_fields_set:
+        dynasty.start_year = data.start_year
+    if "end_year" in data.model_fields_set:
+        dynasty.end_year = data.end_year
     db.commit()
     db.refresh(dynasty)
     return dynasty

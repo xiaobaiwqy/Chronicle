@@ -1,22 +1,6 @@
 // 朝代配色与年份格式化 —— 与高保真原型逐字一致(视觉主干)
 // 内置朝代编年目录:用于关系网图例、添加/编辑人物的朝代下拉。
 
-export interface DynastyBand {
-  name: string
-  color: string
-  cls: string
-  s: number
-  e: number
-}
-
-// 时间线横向色带的朝代区间(前770~220)
-export const DYNASTY_BANDS: DynastyBand[] = [
-  { name: '春秋', color: '#7d7aff', cls: 'dyn-chunqiu', s: -770, e: -476 },
-  { name: '战国', color: '#0a84ff', cls: 'dyn-zhanguo', s: -475, e: -222 },
-  { name: '秦', color: '#30d158', cls: 'dyn-qin', s: -221, e: -207 },
-  { name: '汉', color: '#ff9f0a', cls: 'dyn-han', s: -206, e: 220 },
-]
-
 // 时间线完整分块(三皇五帝→清,连续不重叠的宏观区间):用于时间线背景色带。
 // 颜色 = 该朝代的边色(dynastyColor),与关系网、事件卡片保持一致。
 export interface TimelineBand {
@@ -81,11 +65,11 @@ export const DYNASTY_CATALOG: DynastyEntry[] = [
   { name: '战国·魏', color: '#8e24aa', s: -475, e: -221 },
   { name: '战国·秦', color: '#546e7a', s: -475, e: -221 },
   { name: '秦', color: '#30d158', s: -221, e: -206 },
-  { name: '西汉', color: '#ff9f0a', s: -202, e: 8 },
+  { name: '西汉', color: '#ff8f00', s: -202, e: 8 },
   { name: '新', color: '#ef5350', s: 9, e: 23 },
   { name: '东汉', color: '#fbc02d', s: 25, e: 220 },
   { name: '三国', color: '#00bcd4', s: 220, e: 280 },
-  { name: '西晋', color: '#9575cd', s: 266, e: 316 },
+  { name: '西晋', color: '#7e57c2', s: 266, e: 316 },
   { name: '东晋', color: '#5e35b1', s: 317, e: 420 },
   { name: '南北朝', color: '#4db6ac', s: 420, e: 589 },
   { name: '隋', color: '#26c6da', s: 581, e: 618 },
@@ -97,13 +81,7 @@ export const DYNASTY_CATALOG: DynastyEntry[] = [
   { name: '清', color: '#5c6bc0', s: 1644, e: 1912 },
 ]
 
-// 关系网图例(边色 = 朝代),兼容旧引用:目录的 {name, color} 浅拷贝
-export const DYNASTY_LEGEND: { name: string; color: string }[] = DYNASTY_CATALOG.map((d) => ({
-  name: d.name,
-  color: d.color,
-}))
-
-// 原型 DYN_CLS 映射:具体朝代串 -> 归属朝代类(用于时间线色带 / 遗留复合朝代"战国·赵"等)
+// 遗留复合朝代(如"战国·赵")的归属类:dynastyColor 用它兜底取色(返回的类名仅作内部 token,不再作为 CSS 类)。
 export function dynastyClass(d: string): string {
   if (!d) return 'dyn-default'
   if (d.includes('赵')) return 'dyn-zhao'
@@ -132,13 +110,15 @@ export function setCustomDynastyColors(list: { name: string; color: string }[]) 
   }
 }
 
-// 朝代 -> 十六进制色:自定义朝代(用户指定色)优先;其次目录精确匹配;再其次遗留复合映射;最后哈希。
+// 朝代 -> 十六进制色:自定义朝代(用户指定色)优先;其次目录精确匹配;其次宏观分块(汉/晋等未入目录);再其次遗留复合映射;最后哈希。
 export function dynastyColor(d: string): string {
   if (!d) return '#8e8e93'
   const custom = customColorMap.get(d)
   if (custom) return custom
   const hit = DYNASTY_CATALOG.find((x) => x.name === d)
   if (hit) return hit.color
+  const band = TIMELINE_BANDS.find((b) => b.name === d)
+  if (band) return band.color
   const cls = dynastyClass(d)
   if (cls === 'dyn-zhao') return '#d4b800'
   if (cls === 'dyn-yan') return '#ff6482'
@@ -201,12 +181,102 @@ export function yrRange(a: number | null, b: number | null, approx = false): str
   return approx ? `约${r}` : r
 }
 
-// 解析年份输入:支持 "~" / "约" 前缀或后缀表示「约」(如 "~-260" / "-260~" / "约-260")。
+// 解析年份输入:支持 "~" / "约" 前缀或后缀表示「约」(如 "~-260" / "-260~" / "约-260"),
+// 负数或「前」前缀表示公元前(如 "-260" / "前260" 等价,与展示"前260"一致)。
 export function parseYear(raw: string): { year: number | null; approx: boolean } {
   const t = (raw || '').trim()
   const approx = /[~约]/.test(t)
-  const digits = t.replace(/[^0-9-]/g, '')
-  if (!digits || digits === '-') return { year: null, approx }
-  const n = Number(digits)
-  return { year: Number.isNaN(n) ? null : n, approx }
+  const neg = t.includes('前') || t.includes('-')
+  const digits = t.replace(/[^0-9]/g, '')
+  if (!digits) return { year: null, approx }
+  const abs = Number(digits)
+  if (Number.isNaN(abs)) return { year: null, approx }
+  return { year: neg ? -abs : abs, approx }
+}
+
+// —— 可点亮/熄灭的时间分块(朝代/国家 → 时间区间)—— 用于时间轴背景分块、关系网按区间显隐。
+
+export interface TimeRange {
+  s: number
+  e: number
+}
+
+export interface ToggleableBand extends TimeRange {
+  name: string
+  color: string
+}
+
+// 某朝代/国家的起止区间:自定义朝代(带起止年)优先,其次目录细分,再其次宏观分块;无区间返回 null。
+export function dynastyRange(
+  name: string,
+  custom: { name: string; start_year: number | null; end_year: number | null }[] = [],
+): TimeRange | null {
+  if (!name) return null
+  const c = custom.find((d) => d.name === name && d.start_year != null)
+  if (c && c.start_year != null) {
+    const s = c.start_year
+    return { s, e: c.end_year != null ? Math.max(s, c.end_year) : s }
+  }
+  const hit = DYNASTY_CATALOG.find((x) => x.name === name && x.s != null && x.e != null)
+  if (hit && hit.s != null && hit.e != null) return { s: hit.s, e: hit.e }
+  const band = TIMELINE_BANDS.find((b) => b.name === name)
+  if (band) return { s: band.s, e: band.e }
+  return null
+}
+
+// 两个时间区间是否重叠(端点相接视为不重叠)。
+export function rangesOverlap(a: TimeRange, b: TimeRange): boolean {
+  return a.s < b.e && b.s < a.e
+}
+
+// 可点亮/熄灭的朝代分块全集:宏观分块(18 个) + 目录里带起止年的细分朝代(战国·齐/西汉/东晋…)+ 自定义带年份朝代,按起始年升序。
+export function toggleableDynastyBands(
+  custom: { name: string; color: string; start_year: number | null; end_year: number | null }[] = [],
+): ToggleableBand[] {
+  const seen = new Set<string>()
+  const out: ToggleableBand[] = []
+  for (const b of TIMELINE_BANDS) {
+    seen.add(b.name)
+    out.push({ name: b.name, color: b.color, s: b.s, e: b.e })
+  }
+  for (const d of DYNASTY_CATALOG) {
+    if (d.s == null || d.e == null || seen.has(d.name)) continue
+    seen.add(d.name)
+    out.push({ name: d.name, color: d.color, s: d.s, e: d.e })
+  }
+  for (const c of custom) {
+    if (c.start_year == null || seen.has(c.name)) continue
+    seen.add(c.name)
+    const s = c.start_year
+    out.push({
+      name: c.name,
+      color: c.color || hashColor(c.name),
+      s,
+      e: c.end_year != null ? Math.max(s, c.end_year) : s,
+    })
+  }
+  return out.sort((a, b) => a.s - b.s || a.e - b.e)
+}
+
+// 默认熄灭的朝代/国家:目录里带起止年、但不属于宏观分块的细分朝代(战国·齐/西汉/东汉…),
+// 加上与宏观分块时间重叠的自定义带年份朝代 —— 这些与宏观分块时间重叠,默认只展示宏观分块,
+// 细分/自定义朝代由用户点亮(点亮时自动熄灭重叠的宏观分块)。
+export function defaultUnlitDynastyNames(
+  custom: { name: string; start_year: number | null; end_year: number | null }[] = [],
+): string[] {
+  const broad = new Set(TIMELINE_BANDS.map((b) => b.name))
+  const names = DYNASTY_CATALOG.filter((d) => d.s != null && d.e != null && !broad.has(d.name)).map((d) => d.name)
+  for (const c of custom) {
+    if (c.start_year == null || broad.has(c.name)) continue
+    const s = c.start_year
+    const r = { s, e: c.end_year != null ? Math.max(s, c.end_year) : s }
+    if (TIMELINE_BANDS.some((b) => rangesOverlap(r, b))) names.push(c.name)
+  }
+  return names
+}
+
+// 区间文字:"前475–前221"(单年份只显示一次)。
+export function rangeLabel(r: TimeRange | null | undefined): string {
+  if (!r) return ''
+  return r.s === r.e ? yrFmt(r.s) : `${yrFmt(r.s)}–${yrFmt(r.e)}`
 }

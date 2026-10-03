@@ -38,6 +38,8 @@ export interface CustomDynasty {
   id: number
   name: string
   color: string
+  start_year: number | null
+  end_year: number | null
 }
 
 export interface Relation {

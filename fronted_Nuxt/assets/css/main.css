@@ -39,6 +39,42 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
   background:rgba(20,20,25,.92);color:#fff;font-size:11.5px;padding:5px 11px;border-radius:8px;opacity:0;pointer-events:none;transition:all .18s}
 .rail button:hover .tip{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* 视图切换按钮动画:关系网 = 旋转放大;时间线 = 横线收缩再弹跳展开(激活时各触发一次) */
+.rail button.gv.on svg{animation:rail-spin-pop .45s ease-out}
+@keyframes rail-spin-pop{
+  0%{transform:rotate(0deg) scale(0)}
+  20%{transform:rotate(-140deg) scale(1.22);animation-timing-function:ease-in-out}
+  45%{transform:rotate(-200deg) scale(1.22);animation-timing-function:ease-in-out}
+  65%{transform:rotate(-280deg) scale(1)}
+  100%{transform:rotate(-360deg) scale(1)}
+}
+.rail button.tv.on svg{animation:rail-tl-pop .5s cubic-bezier(.4,0,.2,1)}
+@keyframes rail-tl-pop{
+  0%{transform:scale(0)}
+  60%{transform:scale(1.45)}
+  100%{transform:scale(1)}
+}
+.rail button.tv.on .tl-line{animation:rail-line-bounce .62s cubic-bezier(.32,.72,.35,1);transform-box:fill-box;transform-origin:center}
+@keyframes rail-line-bounce{
+  0%{transform:scaleX(1)}
+  32%{transform:scaleX(.15)}
+  58%{transform:scaleX(1.28)}
+  76%{transform:scaleX(.88)}
+  100%{transform:scaleX(1)}
+}
+
+/* [新增] 时间线模式胶囊开关(事件 / 人物):进入时间线视图后出现在视图切换栏右侧 */
+.tl-mode-switch{position:fixed;left:290px;top:18px;z-index:50;display:flex;align-items:center;gap:2px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:999px;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:2px}
+.tl-mode-switch button{height:22px;padding:0 13px;border:none;border-radius:999px;background:transparent;
+  color:rgba(255,255,255,.52);font-size:12px;font-family:inherit;cursor:pointer;line-height:1;
+  transition:color .2s,background .2s,box-shadow .2s}
+.tl-mode-switch button:hover{color:#fff}
+.tl-mode-switch button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.28)}
+.tl-switch-enter-active,.tl-switch-leave-active{transition:opacity .25s ease,transform .25s ease}
+.tl-switch-enter-from,.tl-switch-leave-to{opacity:0;transform:translateY(-6px)}
+
 /* ---------- 搜索:常驻右上角(未聚焦变暗,聚焦/悬停稍微高亮) ---------- */
 .searchbar{position:fixed;top:18px;right:60px;z-index:60;width:260px;
   background:rgba(255,255,255,.04);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.07);
@@ -99,6 +135,24 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-item.on{background:rgba(10,132,255,.18);color:#fff}
 .g-item i{width:11px;height:11px;border-radius:50%;flex-shrink:0}
 .g-item i.all{background:transparent;border:1.5px solid rgba(255,255,255,.55)}
+/* 朝代"点亮/熄灭"按钮:颜色圆圈 = 开关,点亮带同色光晕、熄灭置灰(无勾选标记) */
+.g-light{width:11px;height:11px;border-radius:50%;flex-shrink:0;border:none;padding:0;cursor:pointer;
+  box-shadow:0 0 0 2px rgba(255,255,255,.2),
+    0 0 5px 1px color-mix(in srgb,var(--lc,transparent) 85%,transparent),
+    0 0 12px 2px color-mix(in srgb,var(--lc,transparent) 40%,transparent);
+  transition:opacity .15s,filter .15s,transform .15s,box-shadow .15s}
+.g-light:hover{transform:scale(1.35);
+  box-shadow:0 0 0 2px rgba(255,255,255,.55),
+    0 0 8px 2px color-mix(in srgb,var(--lc,transparent) 95%,transparent),
+    0 0 18px 4px color-mix(in srgb,var(--lc,transparent) 50%,transparent)}
+.g-light.off{filter:grayscale(.95);opacity:.32;box-shadow:0 0 0 1.5px rgba(255,255,255,.22)}
+.g-swatch{width:11px;height:11px;border-radius:50%;flex-shrink:0;display:inline-block;
+  box-shadow:0 0 0 1.5px rgba(255,255,255,.22)}
+.g-tip{position:fixed;z-index:1000;transform:translateY(-50%);padding:5px 10px;border-radius:7px;
+  background:rgba(18,20,28,.97);border:1px solid rgba(255,255,255,.14);box-shadow:0 6px 20px rgba(0,0,0,.42);
+  font-size:12px;color:#fff;white-space:nowrap;pointer-events:none;backdrop-filter:blur(8px)}
+.gtip-enter-active,.gtip-leave-active{transition:opacity .12s}
+.gtip-enter-from,.gtip-leave-to{opacity:0}
 .g-item .ck{margin-left:auto;flex-shrink:0;color:#4da3ff;opacity:0;transition:opacity .15s}
 .g-item.on .ck{opacity:1}
 .g-empty{padding:10px 12px;font-size:12px;color:rgba(255,255,255,.4);text-align:center}
@@ -117,6 +171,13 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-edit-inp:focus{border-color:rgba(10,132,255,.7)}
 .g-edit-inp.err{border-color:#ff3b30;background:rgba(255,59,48,.12)}
 .g-edit-inp.err:focus{border-color:#ff3b30;box-shadow:0 0 0 3px rgba(255,59,48,.16)}
+.g-edit-col{display:flex;flex-direction:column;flex:1;min-width:0}
+.g-year-row{display:flex;gap:6px;padding:0 8px 5px}
+.g-year-inp{flex:1;min-width:0;width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:6px;
+  color:#fff;font-size:11px;font-family:var(--mono);padding:4px 6px;outline:none}
+.g-year-inp:focus{border-color:rgba(10,132,255,.7)}
+.g-year-inp::placeholder{color:rgba(255,255,255,.32)}
+.g-year-hint{font-size:10px;color:rgba(255,255,255,.42);padding:0 8px 5px;margin-top:-1px}
 .g-dup-warn{font-size:11px;color:#ff3b30;padding:0 8px 5px;margin-top:-2px}
 .g-color{width:16px;height:16px;padding:0;border:none;border-radius:50%;background:none;cursor:pointer;flex-shrink:0}
 .g-color::-webkit-color-swatch-wrapper{padding:0}
@@ -128,44 +189,106 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-row-btn.g-del.on{width:auto;padding:0 6px;background:rgba(255,100,100,.28);color:#ff6b6b;font-size:10px;font-weight:600}
 .g-row-btn.g-ok{background:rgba(10,132,255,.25);color:#4da3ff}
 .g-row-btn.g-ok:hover{background:rgba(10,132,255,.42);color:#fff}
+/* 自定义行操作按钮(编辑/删除)默认隐藏,悬浮条目时才显示;删除"确认?"态保持可见 */
+.g-item > .g-row-btn{opacity:0;transition:opacity .15s,background .15s,color .15s}
+.g-item:hover > .g-row-btn{opacity:1}
+.g-item > .g-row-btn.g-del.on{opacity:1}
 
 /* ---------- 时间线 ---------- */
 .tl-wrap{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;cursor:grab;user-select:none;-webkit-user-select:none}
 .tl-canvas{position:relative;height:100%}
-.dyn-band{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.04);background:color-mix(in srgb, var(--dc) 7%, transparent);border-right:1px dashed color-mix(in srgb, var(--dc) 45%, transparent);cursor:pointer;
+.dyn-band{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.04);background:color-mix(in srgb, var(--dc) 7%, transparent);border-right:1px dashed color-mix(in srgb, var(--dc) 45%, transparent);cursor:pointer;overflow:hidden;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 100px,#000 calc(100% - 100px),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 100px,#000 calc(100% - 100px),transparent 100%);
   transition:background .22s,box-shadow .22s}
 .dyn-band:hover{
   background:color-mix(in srgb,var(--dc) 13%,transparent);
   box-shadow:0 0 0 1px color-mix(in srgb,var(--dc) 26%,transparent),0 8px 24px -6px rgba(0,0,0,.4)}
 .tl-wrap.single .dyn-band:hover{background:color-mix(in srgb,var(--dc) 7%,transparent);box-shadow:none}
-.dyn-band .dyn-lab{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+.dyn-band .dyn-lab{position:absolute;bottom:104px;left:50%;transform:translateX(-50%);
   display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none;white-space:nowrap;color:var(--dc);opacity:.14}
 .dyn-band .dyn-name{font-size:30px;font-weight:800;letter-spacing:.04em;line-height:1}
 .dyn-band .dyn-yrs{font-family:var(--mono);font-size:11px;color:inherit;font-weight:500;opacity:.65}
 .dyn-band .dyn-cnt{font-family:var(--mono);font-size:10px;color:inherit;font-weight:500;opacity:.55}
-.dyn-chunqiu{--dc:#7d7aff;--dcbg:rgba(125,122,255,.06)}
-.dyn-zhanguo{--dc:#0a84ff;--dcbg:rgba(10,132,255,.06)}
-.dyn-qin{--dc:#30d158;--dcbg:rgba(48,209,88,.07)}
-.dyn-han{--dc:#ff9f0a;--dcbg:rgba(255,159,10,.07)}
-.dyn-zhao{--dc:#d4b800;--dcbg:rgba(212,184,0,.07)}
-.dyn-yan{--dc:#ff6482;--dcbg:rgba(255,100,130,.06)}
-.dyn-default{--dc:#8e8e93;--dcbg:rgba(142,142,147,.06)}
 .tl-axis{position:absolute;left:0;right:0;top:50%;height:1.5px;background:rgba(255,255,255,.14)}
 .tl-tick{position:absolute;top:calc(50% - 6px);width:1px;height:13px;background:rgba(255,255,255,.18)}
 .tl-tick span{position:absolute;top:17px;left:-28px;width:60px;text-align:center;font-family:var(--mono);font-size:9.5px;color:rgba(255,255,255,.46)}
 .tl-bin{position:absolute;top:50%;height:4px;margin-top:-2px;border-radius:3px;background:var(--accent);opacity:.55;pointer-events:none}
 .tl-bin-lab{position:absolute;top:16px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:10px;font-weight:600;color:var(--accent);white-space:nowrap}
-.tl-ev{position:absolute;width:150px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+.tl-ev{position:absolute;width:150px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease}
 .tl-ev.above{bottom:calc(50% - 5.5px)}
 .tl-ev.below{top:calc(50% - 5.5px)}
 .tl-ev .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer;transition:transform .15s;flex:0 0 auto}
-.tl-ev .stem{width:1px;height:62px;background:var(--dc);opacity:.4;flex:0 0 auto}
+.tl-ev .stem{width:1px;height:var(--stem,62px);background:var(--dc);opacity:.4;flex:0 0 auto}
 .tl-ev .bx{width:150px;box-sizing:border-box;background:rgba(20,24,34,.92);border:1px solid var(--dc);border-radius:11px;box-shadow:0 4px 16px rgba(0,0,0,.3);padding:8px 11px;cursor:pointer;transition:all .15s;color:#f5f5f7}
 .tl-ev:hover .bx{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .tl-ev:hover .nd{transform:scale(1.3)}
 .tl-ev .bx .t{font-size:12.5px;font-weight:600;line-height:1.35;word-break:break-word}
 .tl-ev .bx .who{font-size:10px;color:rgba(255,255,255,.46);margin-top:2px;font-family:var(--mono)}
+.tl-ev .tl-ev-yr{position:absolute;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;color:rgba(255,255,255,.52);white-space:nowrap;pointer-events:none}
+.tl-ev.above .tl-ev-yr{top:100%;margin-top:6px}
+.tl-ev.below .tl-ev-yr{bottom:100%;margin-bottom:6px}
 .tl-ev.sel .bx{outline:2px solid var(--accent)}
+
+/* [新增] 时间线人物头像(人物模式):圆形头像落在轴线上,悬停放大弹出 + 玻璃简介弹窗 */
+.tl-person{position:absolute;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease}
+.tl-person:hover{z-index:5}
+.tl-person.above{bottom:calc(50% - 5.5px)}
+.tl-person.below{top:calc(50% - 5.5px)}
+.tl-person .tl-person-stem{width:1px;height:var(--stem,30px);background:var(--dc);opacity:.4;flex:0 0 auto}
+.tl-person .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer;transition:transform .15s;flex:0 0 auto}
+.tl-person:hover .nd{transform:scale(1.3)}
+.tl-person .tl-av{width:56px;height:56px;border-radius:50%;border:2px solid #0d1117;background:var(--dc);
+  color:#fff;font-size:23px;font-weight:700;cursor:pointer;display:grid;place-items:center;overflow:hidden;
+  padding:0;font-family:inherit;flex:0 0 auto;
+  box-shadow:0 2px 8px rgba(0,0,0,.45),0 0 0 1.5px var(--dc);
+  transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s}
+.tl-person .tl-av img{width:100%;height:100%;object-fit:cover;display:block}
+.tl-person:hover .tl-av{transform:scale(1.28);box-shadow:0 6px 20px rgba(0,0,0,.5),0 0 0 2px var(--dc),0 0 22px color-mix(in srgb,var(--dc) 55%,transparent)}
+.tl-person.sel .tl-av{outline:2px solid var(--accent);outline-offset:2px}
+.tl-person .tl-person-yr{position:absolute;left:calc(50% + 12px);font-family:var(--mono);font-size:9.5px;color:var(--dc);white-space:nowrap;pointer-events:none}
+.tl-person.above .tl-person-yr{bottom:calc(11px + var(--stem,30px)/2);transform:translateY(50%)}
+.tl-person.below .tl-person-yr{top:calc(11px + var(--stem,30px)/2);transform:translateY(-50%)}
+.tl-person .tl-person-pop{position:absolute;left:50%;width:230px;box-sizing:border-box;padding:11px 13px;border-radius:14px;
+  background:rgba(28,32,42,.72);backdrop-filter:blur(24px) saturate(1.5);-webkit-backdrop-filter:blur(24px) saturate(1.5);
+  border:1px solid rgba(255,255,255,.14);box-shadow:0 14px 44px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.08);
+  color:#f5f5f7;text-align:left;cursor:default;
+  opacity:0;visibility:hidden;pointer-events:auto;transform:translateX(-50%) scale(.92);
+  transition:opacity .2s ease,transform .22s cubic-bezier(.34,1.56,.64,1),visibility .2s}
+.tl-person.above .tl-person-pop{bottom:100%;margin-bottom:7px}
+.tl-person.below .tl-person-pop{top:100%;margin-top:7px}
+.tl-person:hover .tl-person-pop{opacity:1;visibility:visible;transform:translateX(-50%) scale(1)}
+.tl-person-pop-hd{display:flex;align-items:baseline;gap:7px;margin-bottom:5px}
+.tl-person-pop-hd .nm{font-size:14.5px;font-weight:700;color:#fff;letter-spacing:.02em}
+.tl-person-pop-hd .yr{font-family:var(--mono);font-size:10.5px;color:rgba(255,255,255,.5);white-space:nowrap}
+.tl-person-pop .sm{font-size:11.5px;line-height:1.55;color:rgba(255,255,255,.8);margin:0 0 6px;word-break:break-word}
+.tl-person-pop .tg{display:flex;flex-wrap:wrap;gap:4px}
+.tl-person-pop .tg span{font-size:10px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--dc) 45%,rgba(255,255,255,.1));color:#fff}
+
+/* [新增] 事件/人物模式切换动画 + 内容层(不拦截下层朝代块点击,卡片自身恢复点击) */
+.tl-mode-layer{position:absolute;inset:0;pointer-events:none}
+.tl-mode-layer .tl-ev,.tl-mode-layer .tl-person{pointer-events:auto}
+.tl-mode-layer .tl-ev.hide,.tl-mode-layer .tl-person.hide{opacity:0;pointer-events:none}
+.tl-mode-enter-active,.tl-mode-leave-active{transition:opacity .22s ease}
+.tl-mode-enter-from,.tl-mode-leave-to{opacity:0}
+
+/* ---------- 时间线右下角缩放控件(实体按钮 + 拉条) ---------- */
+.tl-zoom{position:fixed;right:22px;bottom:20px;z-index:70;display:flex;align-items:center;gap:10px;
+  padding:8px 12px;border-radius:999px;background:rgba(20,24,34,.34);backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);border:1px solid rgba(255,255,255,.07);box-shadow:0 4px 14px rgba(0,0,0,.22);
+  opacity:.5;transition:opacity .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.tl-zoom:hover{opacity:1;background:rgba(20,24,34,.82);backdrop-filter:blur(20px) saturate(140%);
+  -webkit-backdrop-filter:blur(20px) saturate(140%);border-color:rgba(255,255,255,.1);box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.tl-zoom .zl-btn{width:30px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  border:1px solid rgba(255,255,255,.14);border-radius:50%;background:rgba(255,255,255,.06);color:rgba(255,255,255,.82);
+  font-size:16px;line-height:1;cursor:pointer;transition:background .15s,transform .1s,border-color .15s,color .15s}
+.tl-zoom .zl-btn:hover{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3)}
+.tl-zoom .zl-btn:active{transform:scale(.9)}
+.tl-zoom .zl-range{width:130px;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.2);
+  border-radius:2px;outline:none;cursor:pointer}
+.tl-zoom .zl-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--accent);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer}
+.tl-zoom .zl-range::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:2px solid #0d1117;cursor:pointer}
 
 /* ---------- 人物抽屉(深色玻璃 · 同添加面板) ---------- */
 .drawer{position:fixed;top:14px;right:14px;bottom:14px;width:372px;
@@ -334,7 +457,7 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .chip-p .role{color:var(--ink3);font-size:11px}
 
 .toast{position:fixed;bottom:24px;right:24px;background:rgba(29,29,31,.92);backdrop-filter:blur(10px);color:#fff;padding:10px 16px;border-radius:12px;
-  font-size:12.5px;z-index:90;opacity:0;transform:translateY(8px);transition:all .25s}
+  font-size:12.5px;z-index:90;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none}
 .toast.show{opacity:1;transform:translateY(0)}
 
 /* ---------- 右上角加号按钮(添加人物/关系) ---------- */

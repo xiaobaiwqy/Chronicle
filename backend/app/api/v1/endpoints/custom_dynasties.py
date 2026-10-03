@@ -21,7 +21,7 @@ def create_custom_dynasty(data: schemas.CustomDynastyCreate, db: Session = Depen
         raise HTTPException(status_code=422, detail="朝代/国家名不能为空")
     if crud.get_custom_dynasty_by_name(db, name):
         raise HTTPException(status_code=409, detail="该朝代/国家已存在")
-    return crud.create_custom_dynasty(db, schemas.CustomDynastyCreate(name=name, color=data.color))
+    return crud.create_custom_dynasty(db, schemas.CustomDynastyCreate(name=name, color=data.color, start_year=data.start_year, end_year=data.end_year))
 
 
 @router.put("/{dynasty_id}", response_model=schemas.CustomDynasty)

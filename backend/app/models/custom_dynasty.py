@@ -10,3 +10,6 @@ class CustomDynasty(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True, index=True)
     color = Column(String, default="")
+    # 时间属性:可选起止年份,用于在时间轴上排布为一段朝代区间(可为空)
+    start_year = Column(Integer, nullable=True)
+    end_year = Column(Integer, nullable=True)

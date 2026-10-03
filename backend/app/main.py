@@ -79,6 +79,15 @@ async def lifespan(_: FastAPI):
         if "year_approx" not in event_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE events ADD COLUMN year_approx BOOLEAN NOT NULL DEFAULT 0"))
+    # 轻量迁移:custom_dynasties 表补 start_year/end_year 列(可空的朝代时间属性,用于时间轴排布)。
+    if "custom_dynasties" in inspector.get_table_names():
+        cd_cols = {c["name"] for c in inspector.get_columns("custom_dynasties")}
+        if "start_year" not in cd_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE custom_dynasties ADD COLUMN start_year INTEGER"))
+        if "end_year" not in cd_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE custom_dynasties ADD COLUMN end_year INTEGER"))
     yield
 
 

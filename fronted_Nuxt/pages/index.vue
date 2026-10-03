@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PersonDetail } from '~/types/chronicle'
+import { defaultUnlitDynastyNames, toggleableDynastyBands } from '~/utils/dynasty'
 
 const view = ref<'graph' | 'timeline'>('graph')
 const selectedPersonId = ref<number | null>(null)
@@ -8,7 +9,13 @@ const selectedEventId = ref<number | null>(null)
 const dimmedRelationIds = ref<number[]>([])
 const addOpen = ref(false)
 const libraryOpen = ref(false)
-const dynastyFilter = ref<string | null>(null)
+const dynastyFilter = ref<string[]>([])
+// 点亮/熄灭是两套独立状态,分别驱动两个视图(与 dynastyFilter「打勾筛选事件/人物」也是独立的一套):
+// - graphUnlit(关系网):按朝代标签"名字"显隐人物,与时间无关;默认空 → 全部点亮 → 全部人物显示。
+// - timelineUnlit(时间线):按时间分块显隐,因时间重叠不能默认全显,默认熄灭与宏观分块重叠的细分/自定义朝代。
+const graphUnlit = ref<string[]>([])
+const timelineUnlit = ref<string[]>([])
+const timelineMode = ref<'events' | 'people'>('events')
 const graphRef = ref<{
   focusPerson: (id: number) => void
   toggleEdgeHighlight: (id: number) => void
@@ -19,7 +26,32 @@ const timelineRef = ref<{ focusEvent: (id: number) => void } | null>(null)
 const { persons, fetchAll: fetchPersons, fetchDetail } = usePersons()
 const { events, fetchAll: fetchEvents } = useEvents()
 const { graph, fetchGraph } = useRelations()
-const { fetchAll: fetchDynasties, ensure: ensureDynasties } = useDynasties()
+const { dynasties, fetchAll: fetchDynasties, ensure: ensureDynasties } = useDynasties()
+// 已见过的"默认应熄灭"朝代:新增自定义朝代时只补入首次出现者,不覆盖用户已手动点亮/熄灭的选择。
+const seenDefaultUnlit = new Set<string>()
+
+// 时间线关系链同步:自定义朝代(含起止年)→ 可点亮分块 → 与宏观分块时间重叠者默认熄灭 → timelineUnlit。
+// 随自定义朝代增删自动同步:新增的"默认应熄灭"项补入、已删除的朝代清除残留名,用户手动选择不受影响。
+function syncDefaultUnlit() {
+  const bands = toggleableDynastyBands(dynasties.value)
+  const alive = new Set(bands.map((b) => b.name))
+  // 清除已不存在的朝代残留(被删除、或去掉了起止年)
+  timelineUnlit.value = timelineUnlit.value.filter((n) => alive.has(n))
+  for (const n of [...seenDefaultUnlit]) if (!alive.has(n)) seenDefaultUnlit.delete(n)
+  // 补入首次出现的"默认应熄灭"项(内置细分朝代 + 与宏观分块时间重叠的自定义朝代)
+  const defaults = defaultUnlitDynastyNames(dynasties.value)
+  const fresh = defaults.filter((n) => !seenDefaultUnlit.has(n) && !timelineUnlit.value.includes(n))
+  if (fresh.length) timelineUnlit.value = [...timelineUnlit.value, ...fresh]
+  defaults.forEach((n) => seenDefaultUnlit.add(n))
+}
+watch(dynasties, syncDefaultUnlit, { immediate: true })
+
+// 左上角选框展示/操作的"点亮/熄灭"清单随当前视图切换:关系网操作 graphUnlit,时间线操作 timelineUnlit。
+const activeUnlit = computed(() => (view.value === 'graph' ? graphUnlit.value : timelineUnlit.value))
+function onUnlitChange(names: string[]) {
+  if (view.value === 'graph') graphUnlit.value = names
+  else timelineUnlit.value = names
+}
 const { fetchAll: fetchAvatars } = useAvatars()
 const { message: toastMessage, visible: toastVisible, show: showToast } = useToast()
 
@@ -27,6 +59,7 @@ onMounted(async () => {
   try {
     // 先加载自定义朝代,确保颜色映射就绪后再构建关系网(节点颜色依赖它)
     await fetchDynasties()
+    // 默认熄灭已由 watch(dynasties) 同步:细分朝代 + 与宏观分块时间重叠的自定义朝代(避免默认状态即出现重叠分块)
     await Promise.all([fetchPersons(), fetchEvents(), fetchGraph(), fetchAvatars()])
     // 把已有人物里的自定义朝代(主+次)补录进自定义朝代表,确保它们出现在左上角筛选选框
     const names: string[] = []
@@ -110,9 +143,11 @@ function onEdgeDimChange(ids: number[]) {
   dimmedRelationIds.value = ids
 }
 
-// 搜索栏/左上角选框点击朝代/国家:统一筛选关系网与时间线
+// 搜索栏/左上角选框点击朝代/国家:统一筛选关系网与时间线(多选:点一下选中,再点取消)
 function filterDynasty(color: string) {
-  dynastyFilter.value = color
+  const i = dynastyFilter.value.indexOf(color)
+  if (i >= 0) dynastyFilter.value = dynastyFilter.value.filter((c) => c !== color)
+  else dynastyFilter.value = [...dynastyFilter.value, color]
 }
 
 // 切换朝代/国家筛选时,人物详情抽屉右滑退出(覆盖 DynastySelect v-model 与 SearchBar 两个入口)
@@ -202,20 +237,26 @@ onBeforeUnmount(() => {
         :highlight-id="highlightId"
         :active="view === 'graph'"
         :dynasty-filter="dynastyFilter"
+        :unlit-dynasties="graphUnlit"
         @select-person="onSelectPerson"
         @select-blank="onBlank"
         @edge-dim-change="onEdgeDimChange"
-        @clear-dynasty-filter="dynastyFilter = null"
+        @clear-dynasty-filter="dynastyFilter = []"
       />
     </div>
     <div id="view-timeline" :class="{ on: view === 'timeline' }">
       <TimelineView
         ref="timelineRef"
         :events="events"
+        :persons="persons"
+        :mode="timelineMode"
         :selected-event-id="selectedEventId"
+        :selected-person-id="selectedPersonId"
         :active="view === 'timeline'"
         :dynasty-filter="dynastyFilter"
+        :unlit-dynasties="timelineUnlit"
         @select-event="openEvent"
+        @select-person="onSelectPerson"
       />
     </div>
   </div>
@@ -226,8 +267,14 @@ onBeforeUnmount(() => {
       <path d="M18 3h-5v18h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
     </svg>
   </button>
-  <DynastySelect v-model="dynastyFilter" :persons="persons" />
+  <DynastySelect v-model="dynastyFilter" :unlit="activeUnlit" :mode="view" :persons="persons" @update:unlit="onUnlitChange" />
   <SideRail :model-value="view" @update:model-value="setView" />
+  <Transition name="tl-switch">
+    <div v-if="view === 'timeline'" class="tl-mode-switch">
+      <button :class="{ on: timelineMode === 'events' }" @click="timelineMode = 'events'">事件</button>
+      <button :class="{ on: timelineMode === 'people' }" @click="timelineMode = 'people'">人物</button>
+    </div>
+  </Transition>
   <SearchBar
     :persons="persons"
     :events="events"

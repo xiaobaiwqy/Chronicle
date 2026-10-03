@@ -8,7 +8,8 @@ const props = defineProps<{
   edges: GraphEdge[]
   highlightId: number | null
   active: boolean
-  dynastyFilter: string | null
+  dynastyFilter: string[]
+  unlitDynasties: string[]
 }>()
 const emit = defineEmits<{
   (e: 'select-person', id: number): void
@@ -519,8 +520,12 @@ function pickAt(e: MouseEvent) {
   mouseV.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
   mouseV.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
   raycaster.setFromCamera(mouseV, camera)
-  const nodeHit = raycaster.intersectObjects(pickMeshes)[0]
-  const edgeHit = nodeHit ? null : raycaster.intersectObjects(edgePickMeshes)[0]
+  // 只对"可见"对象拾取:raycaster 不自动跳过 visible=false 的对象,须手动过滤。
+  // 隐藏节点的拾取球挂在节点组下(组 visible=false),隐藏连线的拾取盒自身 visible=false。
+  const visPicks = pickMeshes.filter((m) => m.parent?.visible !== false)
+  const visEdgePicks = edgePickMeshes.filter((m) => m.visible !== false)
+  const nodeHit = raycaster.intersectObjects(visPicks)[0]
+  const edgeHit = nodeHit ? null : raycaster.intersectObjects(visEdgePicks)[0]
   return { nodeHit, edgeHit }
 }
 
@@ -778,7 +783,7 @@ function nodeLinked(p: Person): boolean {
   if (highlightNodeIds.value.size) {
     return highlightNodeIds.value.has(p.id)
   }
-  if (!currentHighlightId && !props.dynastyFilter) return true
+  if (!currentHighlightId && !props.dynastyFilter.length) return true
   if (currentHighlightId) {
     if (p.id === currentHighlightId) return true
     // 一度邻居:与聚焦者之间的连线若被手动熄灭,则该人物也退后(取消凸显)
@@ -787,7 +792,7 @@ function nodeLinked(p: Person): boolean {
       return connects && !dimmedEdges.value.has(r.id)
     })) return true
   }
-  if (props.dynastyFilter && dynastyColor(p.dynasty) === props.dynastyFilter) return true
+  if (props.dynastyFilter.includes(dynastyColor(p.dynasty))) return true
   return false
 }
 
@@ -796,7 +801,7 @@ function nodeLinked(p: Person): boolean {
 function nodeHalo(p: Person): boolean {
   if (highlightNodeIds.value.size) return highlightNodeIds.value.has(p.id)
   if (currentHighlightId != null) return p.id === currentHighlightId
-  if (props.dynastyFilter) return dynastyColor(p.dynasty) === props.dynastyFilter
+  if (props.dynastyFilter.length) return props.dynastyFilter.includes(dynastyColor(p.dynasty))
   return false
 }
 
@@ -806,20 +811,35 @@ function edgeLevel(r: { id: number; from: number; to: number }): number {
   if (highlightNodeIds.value.size) {
     return highlightNodeIds.value.has(r.from) && highlightNodeIds.value.has(r.to) ? 1 : 0
   }
-  if (!currentHighlightId && !props.dynastyFilter) return 1
+  if (!currentHighlightId && !props.dynastyFilter.length) return 1
   if (currentHighlightId && (r.from === currentHighlightId || r.to === currentHighlightId)) return 2
-  if (props.dynastyFilter) {
+  if (props.dynastyFilter.length) {
     const fp = byId.get(r.from)
     const tp = byId.get(r.to)
-    if (fp && tp && dynastyColor(fp.dynasty) === props.dynastyFilter && dynastyColor(tp.dynasty) === props.dynastyFilter) return 1
+    if (fp && tp && props.dynastyFilter.includes(dynastyColor(fp.dynasty)) && props.dynastyFilter.includes(dynastyColor(tp.dynasty))) return 1
   }
   return 0
+}
+
+// 人物是否"点亮"可见:按朝代标签(主 + 次)的名字判断 —— 任一标签未被熄灭即保留;
+// 无标签人物始终展示。关系网与时间无关,不做时间重叠判断。
+function personVisible(p: Person): boolean {
+  const tags = [p.dynasty, ...(p.secondary_dynasties ?? [])].filter((n) => n && n.trim())
+  if (!tags.length) return true
+  return tags.some((n) => !props.unlitDynasties.includes(n))
 }
 
 function applyHighlight() {
   if (!built || !edgeGroup) return
   const op = T.edgeOp
   edgeRecords.forEach((rec) => {
+    // 点亮/熄灭:连线两端人物都可见才显示该连线
+    const fromP = byId.get(rec.from)
+    const toP = byId.get(rec.to)
+    const vis = (!fromP || personVisible(fromP)) && (!toP || personVisible(toP))
+    rec.mesh.visible = vis
+    rec.label.visible = vis
+    rec.pick.visible = vis
     const lv = edgeLevel({ id: rec.id, from: rec.from, to: rec.to })
     rec.mat.opacity = lv === 0 ? 0.05 : (lv === 2 ? 0.9 : op)
     // 边上的关系名标签跟随线一起变暗,避免压暗的线还挂着亮白的字
@@ -830,6 +850,8 @@ function applyHighlight() {
     if (!g) return
     const linked = nodeLinked(p)
     g.userData.linked = linked
+    // 点亮/熄灭:熄灭朝代的全部标签人物隐藏(节点组 visible=false,连同光环/标签/拾取一起消失)
+    g.visible = personVisible(p)
     // 非高亮节点退后:头像是不透明实心圆牌,不能用 opacity 压暗;改用"颜色降亮度"让其退后(材质 color 乘系数)
     const faceMat = (g.userData.face as THREE.Sprite).material as THREE.SpriteMaterial
     faceMat.color.setScalar(linked ? 1 : 0.25)
@@ -1073,7 +1095,7 @@ function animate() {
     // 光晕始终垫在头像后面(背光):沿视线方向往后推,让不透明头像挡住光晕中心,只露外圈。
     const halo = g.userData.halo as THREE.Sprite
     const haloLit = nodeHalo(p)
-    const boost = (highlightNodeIds.value.size || props.dynastyFilter) ? 1.8 : 1.6
+    const boost = (highlightNodeIds.value.size || props.dynastyFilter.length) ? 1.8 : 1.6
     halo.material.opacity = haloLit ? T.haloBase * boost + breath * 0.02 : 0
     halo.scale.setScalar(g.userData.haloBase * boost * (1 + breath * 0.03))
     const hCam = new THREE.Vector3().subVectors(camera.position, g.position).normalize()
@@ -1183,12 +1205,18 @@ watch(
   (filter) => {
     highlightNodeIds.value = new Set() // 切到朝代筛选:退出事件人物点亮
     applyHighlight()
-    // 选择朝代后,把镜头框住该朝代的全体人物(与搜索选事件的框选一致);清除筛选时不框选
-    if (filter) {
-      const ids = nodes.filter((p) => dynastyColor(p.dynasty) === filter).map((p) => p.id)
+    // 选择朝代后,把镜头框住这些朝代的全体人物(与搜索选事件的框选一致);清除筛选时不框选
+    if (filter.length) {
+      const ids = nodes.filter((p) => filter.includes(dynastyColor(p.dynasty))).map((p) => p.id)
       framePersons(ids)
     }
   },
+)
+
+// 朝代"点亮/熄灭"变化:重新计算人物/连线显隐(无需重建,仅切换 visible)
+watch(
+  () => props.unlitDynasties,
+  () => applyHighlight(),
 )
 watch(dimmedEdges, (s) => {
   applyHighlight()
