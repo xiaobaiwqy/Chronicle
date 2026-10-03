@@ -197,20 +197,23 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 /* ---------- 时间线 ---------- */
 .tl-wrap{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;cursor:grab;user-select:none;-webkit-user-select:none}
 .tl-canvas{position:relative;height:100%}
-.dyn-band{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.04);background:color-mix(in srgb, var(--dc) 7%, transparent);border-right:1px dashed color-mix(in srgb, var(--dc) 45%, transparent);cursor:pointer;overflow:hidden;
-  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 100px,#000 calc(100% - 100px),transparent 100%);
-  mask-image:linear-gradient(to bottom,transparent 0,#000 100px,#000 calc(100% - 100px),transparent 100%);
-  transition:background .22s,box-shadow .22s}
-.dyn-band:hover{
-  background:color-mix(in srgb,var(--dc) 13%,transparent);
-  box-shadow:0 0 0 1px color-mix(in srgb,var(--dc) 26%,transparent),0 8px 24px -6px rgba(0,0,0,.4)}
-.tl-wrap.single .dyn-band:hover{background:color-mix(in srgb,var(--dc) 7%,transparent);box-shadow:none}
+.dyn-band{position:absolute;top:0;bottom:0;cursor:pointer;overflow:hidden}
+.dyn-band::before{content:"";position:absolute;inset:0;
+  background:color-mix(in srgb, var(--dc) 7%, transparent);
+  border-right:1px dashed color-mix(in srgb, var(--dc) 45%, transparent);
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 25%,#000 75%,transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 25%,#000 75%,transparent 100%);
+  transition:background .22s}
+.dyn-band:hover::before{background:color-mix(in srgb,var(--dc) 13%,transparent);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dc) 26%,transparent)}
+.tl-wrap.single .dyn-band:hover::before{background:color-mix(in srgb,var(--dc) 7%,transparent);box-shadow:none}
 .dyn-band .dyn-lab{position:absolute;bottom:104px;left:50%;transform:translateX(-50%);
   display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none;white-space:nowrap;color:var(--dc);opacity:.14}
 .dyn-band .dyn-name{font-size:30px;font-weight:800;letter-spacing:.04em;line-height:1}
 .dyn-band .dyn-yrs{font-family:var(--mono);font-size:11px;color:inherit;font-weight:500;opacity:.65}
 .dyn-band .dyn-cnt{font-family:var(--mono);font-size:10px;color:inherit;font-weight:500;opacity:.55}
-.tl-axis{position:absolute;left:0;right:0;top:50%;height:1.5px;background:rgba(255,255,255,.14)}
+.tl-axis{position:fixed;left:0;right:0;top:50%;height:1.5px;
+  background:linear-gradient(to right,transparent,rgba(255,255,255,.12) 24%,rgba(255,255,255,.4) 50%,rgba(255,255,255,.12) 76%,transparent)}
 .tl-tick{position:absolute;top:calc(50% - 6px);width:1px;height:13px;background:rgba(255,255,255,.18)}
 .tl-tick span{position:absolute;top:17px;left:-28px;width:60px;text-align:center;font-family:var(--mono);font-size:9.5px;color:rgba(255,255,255,.46)}
 .tl-bin{position:absolute;top:50%;height:4px;margin-top:-2px;border-radius:3px;background:var(--accent);opacity:.55;pointer-events:none}
