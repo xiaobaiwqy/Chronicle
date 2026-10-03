@@ -2,7 +2,7 @@
 // 库:人物库 + 事件库双栏,批量管理(新增 / 编辑 / 删除)。
 // 复用 .ap-* 表单体系(字段、胶囊输入、下拉、多选、取色、头像库等全局样式与组件)。
 import type { ChronicleEvent, Person, SelectOption } from '~/types/chronicle'
-import { dynastyColor, dynastyOptions, parseYear, yrRange } from '~/utils/dynasty'
+import { dynastyColor, dynastyOptions, parseYear, yrRange, sanitizeYearEl } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'changed'): void }>()
@@ -453,8 +453,8 @@ const eventList = computed(() =>
               </div>
               <div class="ap-field">
                 <label>年份(可不填)</label>
-                <input v-model="evForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
-                <div class="ap-hint">负数表示公元前,如 –260 = 前 260 年;加 ~ 或「约」表示约略年份</div>
+                <input v-model="evForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" @input="evForm.year = sanitizeYearEl($event)" />
+                <div class="ap-hint">- 表示公元前(如 -260 = 前 260 年),~ 表示约略年份</div>
               </div>
 
               <div class="ap-field">

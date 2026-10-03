@@ -194,6 +194,19 @@ export function parseYear(raw: string): { year: number | null; approx: boolean }
   return { year: neg ? -abs : abs, approx }
 }
 
+// 年份输入净化:只允许「~」(约)、「-」(前/负)、数字,其余字符一律剔除(所有时间输入框统一走这里)。
+export function sanitizeYearInput(raw: string): string {
+  return (raw || '').replace(/[^~0-9-]/g, '')
+}
+
+// 绑定到 input 事件的净化器:同步强制 DOM 值(避免 v-model 因模型未变而残留被剔除的字符),返回净化后的字符串。
+export function sanitizeYearEl(e: Event): string {
+  const el = e.target as HTMLInputElement
+  const clean = sanitizeYearInput(el.value)
+  if (clean !== el.value) el.value = clean
+  return clean
+}
+
 // —— 可点亮/熄灭的时间分块(朝代/国家 → 时间区间)—— 用于时间轴背景分块、关系网按区间显隐。
 
 export interface TimeRange {

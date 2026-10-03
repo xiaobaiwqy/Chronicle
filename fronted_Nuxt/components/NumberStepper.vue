@@ -1,16 +1,25 @@
 <script setup lang="ts">
 // 年份等数字输入的胶囊步进框:隐藏原生方形箭头,换成一对圆润的上下按钮
+import { sanitizeYearInput } from '~/utils/dynasty'
+
 const props = withDefaults(defineProps<{ modelValue: string; placeholder?: string }>(), { placeholder: '' })
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
 
 function onInput(e: Event) {
-  emit('update:modelValue', (e.target as HTMLInputElement).value)
+  const el = e.target as HTMLInputElement
+  const clean = sanitizeYearInput(el.value)
+  if (clean !== el.value) el.value = clean
+  emit('update:modelValue', clean)
 }
 
+// 步进(±1):保留「~」前缀与「-」负号,只对数字部分加减;空值按 0 处理(减一即 -1)。
 function bump(delta: number) {
-  const n = props.modelValue === '' ? 0 : Number(props.modelValue)
+  const raw = props.modelValue
+  const tilde = raw.startsWith('~') ? '~' : ''
+  const rest = tilde ? raw.slice(1) : raw
+  const n = rest === '' ? 0 : Number(rest)
   const base = Number.isNaN(n) ? 0 : n
-  emit('update:modelValue', String(base + delta))
+  emit('update:modelValue', tilde + String(base + delta))
 }
 </script>
 
@@ -18,7 +27,9 @@ function bump(delta: number) {
   <div class="nstep">
     <input
       class="ap-inp mono"
-      type="number"
+      type="text"
+      inputmode="text"
+      autocomplete="off"
       :value="modelValue"
       :placeholder="placeholder"
       @input="onInput"

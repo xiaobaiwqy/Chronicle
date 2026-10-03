@@ -27,7 +27,7 @@ const K_SPAN = 0.8 // 每单位年份的基础像素(线性比例)
 const NAME_W = 30 // 与 .dyn-name 字号一致(标签文字竖排时以名称为最宽)
 const PAD2 = 20 // 标签文字右侧留白(判定块宽能否放下文字)
 const NAME_PAD = 24 // "不详"区块标签两侧留白
-const PAD = 40 // 画布左右留白
+const PAD = 90 // 画布左右留白(需 ≥ 卡片半宽 75,保证最左/最右事件卡不越界被裁)
 const TICK_GAP = 56 // 相邻刻度最小像素间距(低于则合并)
 const CARD_W = 150 // 卡片宽度
 const CARD_GAP = 6 // 相邻卡片最小间隙
@@ -45,7 +45,7 @@ const EV_TIERS = [48, 122] // 事件 stem 高度(上下对称)
 const AV_TIERS = [50, 130, 210] // 人物 stem 高度(上下对称)
 const EV_JITTER = 8 // 事件每档随机上下浮动范围(px)
 const AV_JITTER = 9 // 人物每档随机上下浮动范围(px)
-const YEAR_LABEL_W = 64 // 生卒标注文字的最小横向间距(同侧不足则隐藏标注,避免重叠)
+const YEAR_LABEL_W = 100 // 生卒标注(人名+生卒)的最小横向间距(同侧不足则隐藏标注,避免重叠)
 
 // id -> [0,1) 稳定哈希:用于给"不详"事件分配稳定的随机虚拟坐标、以及确定性浮动(避免抖动)
 function hash01(id: number): number {
@@ -381,10 +381,13 @@ const ticks = computed(() => {
   years.add(timeDomain.value)
   if (props.mode === 'people') for (const p of filteredPeople.value) years.add(personAnchorYear(p)!)
   // 事件模式:事件年份改由节点处 tl-ev-yr 标注,不再作为刻度显示,避免与节点标签(同 x 同字)重叠。
+  // 事件模式:刻度还要避开事件节点自身的 x(节点处已显示年份),否则分块起点(如 -3000)恰有事件时两者同 x 叠字。
+  const eventXs = props.mode === 'events' ? filteredDated.value.map((e) => xOf(e.year_start)) : []
   const sorted = [...years].sort((a, b) => a - b)
   const out: number[] = []
   for (const y of sorted) {
     if (out.length && Math.abs(xOf(y) - xOf(out[out.length - 1])) < TICK_GAP) continue
+    if (eventXs.length && eventXs.some((ex) => Math.abs(ex - xOf(y)) < TICK_GAP)) continue
     out.push(y)
   }
   return out
@@ -620,12 +623,26 @@ function wheelDeltaY(e: WheelEvent): number {
   return e.deltaY
 }
 
+function wheelDeltaX(e: WheelEvent): number {
+  if (e.deltaMode === 1) return e.deltaX * 33
+  if (e.deltaMode === 2) return e.deltaX * (wrapEl.value?.clientWidth || 900)
+  return e.deltaX
+}
+
 function onWheel(e: WheelEvent) {
   e.preventDefault()
   const wrap = wrapEl.value!
-  const cx = wrap.clientWidth / 2
-  const centerYear = yearAtX(wrap.scrollLeft + cx)
-  animateTo(zoom.value * Math.exp(-wheelDeltaY(e) * 0.0015), () => xOf(centerYear) - cx, 80)
+  // 触控板横向滑动(deltaX 为主)→ 左右平移;纵向滚动(deltaY 为主)→ 缩放。
+  const dx = wheelDeltaX(e)
+  const dy = wheelDeltaY(e)
+  if (Math.abs(dx) > Math.abs(dy)) {
+    stopZoom() // 平移前停掉进行中的缩放循环,避免逐帧重设 scrollLeft 覆盖手动平移
+    wrap.scrollLeft += dx
+  } else {
+    const cx = wrap.clientWidth / 2
+    const centerYear = yearAtX(wrap.scrollLeft + cx)
+    animateTo(zoom.value * Math.exp(-dy * 0.0015), () => xOf(centerYear) - cx, 80)
+  }
 }
 
 // —— 右下角缩放控件(实体按钮 + 拉条) ——
@@ -679,7 +696,6 @@ function onResize() {
   syncScroll()
 }
 
-let scrolledOnce = false
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
@@ -697,21 +713,45 @@ onMounted(() => {
   }
 })
 
-// 切回时间线时重测高度;初始滚动到最早事件(无事件则回到最左),只设置一次
+// 进入时的中线流光:单次扫过(非无限循环),每次点时间线按钮进入都重放一次。
+const flowOn = ref(false)
+let flowTimer: ReturnType<typeof setTimeout> | null = null
+function playFlow() {
+  flowOn.value = false
+  if (flowTimer) clearTimeout(flowTimer)
+  nextTick(() => {
+    flowOn.value = true
+    flowTimer = setTimeout(() => { flowOn.value = false }, 1750)
+  })
+}
+
+// 每次进入时间线时固定的起步放大倍数:先跳到此放大态,再平滑收缩到概览。
+// 与首次进入的默认 zoom(1)一致,保证无论上次离开时处于何种缩放/位置,进入都有一段可见的收缩动画。
+const ENTRY_ZOOM = 1
+
+// 切回时间线时:重测视口尺寸,并同步播放"收缩到概览"(从固定放大倍数缩回全览并居中)+ 中线流光。
 watch(
   () => props.active,
   async (on) => {
-    if (!on) return
+    if (!on) {
+      // 离开时间线:熄灭流光并清掉定时器,并停掉仍在进行的缩放循环,
+      // 否则循环会在隐藏状态下继续跑,下次进入时 animateTo 因 zoomRaf 非零而提前返回、不再收缩。
+      flowOn.value = false
+      if (flowTimer) { clearTimeout(flowTimer); flowTimer = null }
+      stopZoom()
+      return
+    }
     await nextTick()
     syncScroll()
-    if (!scrolledOnce && wrapEl.value) {
-      const first = [...datedEvents.value].sort((a, b) => a.year_start - b.year_start)[0]
-      if (first) wrapEl.value.scrollLeft = xOf(first.year_start) - 200
-      else if (undatedBand.value.count) wrapEl.value.scrollLeft = undatedBand.value.x0 - 100
-      else wrapEl.value.scrollLeft = 0
-      scrolledOnce = true
-      syncScroll()
+    stopZoom() // 先确保没有残留的缩放循环,再启动全新的"收缩到概览"动画
+    const vw = wrapEl.value?.clientWidth || 0
+    if (vw) {
+      // 先固定回放大起步态并居中,再动画收缩到概览,保证每次进入都有可感知的收缩过程。
+      zoom.value = ENTRY_ZOOM
+      wrapEl.value!.scrollLeft = (totalW.value - vw) / 2
+      animateTo(zoomMin.value, () => (totalW.value - vw) / 2, 360)
     }
+    playFlow()
   },
 )
 
@@ -756,7 +796,7 @@ onBeforeUnmount(() => {
       >
         <div class="dyn-lab"><span class="dyn-name">不详</span><span class="dyn-yrs">未定年</span><span class="dyn-cnt">当前记录 {{ undatedBand.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
       </div>
-      <div class="tl-axis"></div>
+      <div class="tl-axis" :class="{ flow: flowOn }"></div>
       <div v-for="y in ticks" :key="y" class="tl-tick" :style="{ left: xOf(y) + 'px' }">
         <span>{{ yrFmt(y) }}</span>
       </div>
@@ -817,10 +857,10 @@ onBeforeUnmount(() => {
               </button>
               <div class="tl-person-stem"></div>
               <div class="nd"></div>
-              <span v-if="c.showYr" class="tl-person-yr">{{ yrRange(c.p.birth_year, c.p.death_year) }}</span>
+              <span v-if="c.showYr" class="tl-person-yr"><b>{{ c.p.name }}</b><br>{{ yrRange(c.p.birth_year, c.p.death_year) }}</span>
             </template>
             <template v-else>
-              <span v-if="c.showYr" class="tl-person-yr">{{ yrRange(c.p.birth_year, c.p.death_year) }}</span>
+              <span v-if="c.showYr" class="tl-person-yr"><b>{{ c.p.name }}</b><br>{{ yrRange(c.p.birth_year, c.p.death_year) }}</span>
               <div class="nd"></div>
               <div class="tl-person-stem"></div>
               <button class="tl-av" :aria-label="c.p.name">

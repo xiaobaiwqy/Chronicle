@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Person, SelectOption } from '~/types/chronicle'
-import { dynastyColor, dynastyOptions, parseYear } from '~/utils/dynasty'
+import { dynastyColor, dynastyOptions, parseYear, sanitizeYearEl } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean; persons: Person[] }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
@@ -486,8 +486,8 @@ async function submitEvent() {
             </div>
             <div class="ap-field">
               <label>年份</label>
-              <input v-model="eForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
-              <div class="ap-hint">负数表示公元前,如 –260 = 前 260 年;加 ~ 或「约」表示约略年份</div>
+              <input v-model="eForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" @input="eForm.year = sanitizeYearEl($event)" />
+              <div class="ap-hint">- 表示公元前(如 -260 = 前 260 年),~ 表示约略年份</div>
             </div>
             <div class="ap-field">
               <label>简述</label>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CustomDynasty, Person } from '~/types/chronicle'
-import { DYNASTY_CATALOG, hashColor, dynastyRange, rangeLabel, rangesOverlap, toggleableDynastyBands, parseYear } from '~/utils/dynasty'
+import { DYNASTY_CATALOG, hashColor, dynastyRange, rangeLabel, rangesOverlap, toggleableDynastyBands, parseYear, sanitizeYearEl } from '~/utils/dynasty'
 
 // 全局"朝代/国家"筛选选框:关系网与时间线共用,支持多选打勾(点一下选中,再点取消)。
 // 选中朝代颜色数组由父组件持有(v-model),分别驱动关系网的边/节点高亮与时间线的事件过滤。
@@ -318,10 +318,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           </button>
         </div>
         <div class="g-year-row">
-          <input v-model="newStart" class="g-year-inp" type="text" placeholder="起始年" @keydown.enter="confirmAdd" />
-          <input v-model="newEnd" class="g-year-inp" type="text" placeholder="结束年" @keydown.enter="confirmAdd" />
+          <input v-model="newStart" class="g-year-inp" type="text" placeholder="起始年" @keydown.enter="confirmAdd" @input="newStart = sanitizeYearEl($event)" />
+          <input v-model="newEnd" class="g-year-inp" type="text" placeholder="结束年" @keydown.enter="confirmAdd" @input="newEnd = sanitizeYearEl($event)" />
         </div>
-        <div class="g-year-hint">负数或「前」表公元前(如 -221 / 前221)</div>
+        <div class="g-year-hint">- 表公元前(如 -221),~ 表示约</div>
       </div>
       <div v-if="adding && newDup" class="g-dup-warn">已存在同名朝代/国家</div>
 
@@ -382,10 +382,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               </button>
             </div>
             <div class="g-year-row">
-              <input v-model="editStart" class="g-year-inp" type="text" placeholder="起始年" @keydown.enter="confirmEdit" />
-              <input v-model="editEnd" class="g-year-inp" type="text" placeholder="结束年" @keydown.enter="confirmEdit" />
+              <input v-model="editStart" class="g-year-inp" type="text" placeholder="起始年" @keydown.enter="confirmEdit" @input="editStart = sanitizeYearEl($event)" />
+              <input v-model="editEnd" class="g-year-inp" type="text" placeholder="结束年" @keydown.enter="confirmEdit" @input="editEnd = sanitizeYearEl($event)" />
             </div>
-            <div class="g-year-hint">负数或「前」表公元前(如 -221 / 前221)</div>
+            <div class="g-year-hint">- 表公元前(如 -221),~ 表示约</div>
           </div>
         </template>
         <template v-else>

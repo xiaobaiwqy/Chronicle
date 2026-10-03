@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ChronicleEvent, PersonDetail, SelectOption } from '~/types/chronicle'
-import { dynastyColor, dynastyOptions, parseYear, yrRange } from '~/utils/dynasty'
+import { dynastyColor, dynastyOptions, parseYear, yrRange, sanitizeYearEl } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean; detail: PersonDetail | null; dimmedRelations?: number[]; dismissOnOutside?: boolean }>()
 const emit = defineEmits<{
@@ -706,7 +706,7 @@ onBeforeUnmount(() => {
               <div class="ap-pair">
                 <div class="ap-field">
                   <label>年份(可不填)</label>
-                  <input v-model="editForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
+                  <input v-model="editForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" @input="editForm.year = sanitizeYearEl($event)" />
                 </div>
                 <div class="ap-field">
                   <label>定位</label>
@@ -793,7 +793,7 @@ onBeforeUnmount(() => {
           <div class="ap-pair">
             <div class="ap-field">
               <label>年份(可不填)</label>
-              <input v-model="recForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" />
+              <input v-model="recForm.year" class="ap-inp" placeholder="如 –260 或 ~-260" @input="recForm.year = sanitizeYearEl($event)" />
             </div>
             <div class="ap-field">
               <label>定位</label>

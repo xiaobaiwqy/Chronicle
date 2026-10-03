@@ -79,6 +79,12 @@ const ORIGIN = new THREE.Vector3(0, 0, 0)
 let freeOrbitQ = new THREE.Quaternion().copy(orbitQ)
 let freeCamR = DEFAULT_R
 
+// 视角定格/恢复:离开关系网时保存当前机位,再次进入时从 reveal 机位平滑飞回它;首次进入时 saved 仍等于初始机位,故开场运镜自动飞向初始机位。
+let savedOrbitQ = new THREE.Quaternion().copy(orbitQ)
+let savedCamR = DEFAULT_R
+let savedFocus = new THREE.Vector3(0, 0, 0)
+let hasEntered = false
+
 // 聚焦/退焦过渡动画:orbitQ 用 slerp,中心/缩放用 lerp,easeInOutCubic 缓动,可被打断
 const focusAnim = {
   active: false,
@@ -511,6 +517,11 @@ function buildGraph() {
 
   built = true
   builtReactive.value = true
+  // 首次构建且处于关系网视图时,播放开场运镜(先摆到 reveal 机位再启动过渡,避免首帧闪一下默认位)。重建(数据变化)时不重播。
+  if (!hasEntered && props.active) {
+    hasEntered = true
+    playEntryDolly(savedOrbitQ, savedFocus, savedCamR, 1500)
+  }
   animate()
 }
 
@@ -757,6 +768,25 @@ function startFocusAnim(toQ: THREE.Quaternion, toFocus: THREE.Vector3, toR: numb
   idleT = 0                    // 重置待机自转相位,动画结束后自转计时从零开始
   // focusTarget/targetCamR 不在此处改写:它们只在过渡结束(animate 的 k>=1 分支)或拖动打断时提交,
   // 保证过渡插值与稳态指数逼近共用同一目标,避免两套更新在第一帧叠加造成"先瞬移再缓动"的跳变。
+}
+
+// 保存当前机位(离开关系网时定格,供下次进入恢复)
+function saveCamera() {
+  savedOrbitQ.copy(orbitQ)
+  savedCamR = camR
+  savedFocus.copy(curFocus)
+}
+
+// 进入运镜:从一个更远、略侧偏的 reveal 机位平滑飞入目标机位。
+// 首次进入 saved 即初始机位(飞入初始定格);再次进入 saved 是上次离开时的定格机位(飞回它)。
+function playEntryDolly(targetQ: THREE.Quaternion, targetFocus: THREE.Vector3, targetR: number, dur = 1300) {
+  const revealQ = targetQ.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(Y_AXIS, 0.38))
+  orbitQ.copy(revealQ)
+  camR = Math.min(targetR * 1.4, 620) // 封顶避免 reveal 距离超出用户可缩放上限,落入过浓雾区
+  curFocus.copy(targetFocus)
+  focusTarget.copy(targetFocus)
+  targetCamR = camR
+  startFocusAnim(targetQ.clone(), targetFocus.clone(), targetR, dur)
 }
 
 // 切换某条连线的亮/暗:点一下翻转,不影响其它连线
@@ -1179,13 +1209,21 @@ watch(
 watch(
   () => props.active,
   (a) => {
-    if (a) nextTick(() => {
+    if (!a) {
+      // 离开关系网:定格当前机位,供下次进入恢复
+      saveCamera()
+      return
+    }
+    nextTick(() => {
       ensureBuilt()
       onResize()
       // 重新激活:重置时间基准后续上渲染循环,避免切回来瞬间镜头跳变 / 立刻触发待机自转
       prevNow = performance.now()
       lastInteract = performance.now()
       if (built && !rafId) rafId = requestAnimationFrame(animate)
+      // 每次进入都播放运镜:飞回上次定格机位(首次进入时 saved 即初始机位)
+      hasEntered = true
+      playEntryDolly(savedOrbitQ, savedFocus, savedCamR, 1200)
     })
   },
 )
