@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ChronicleEvent, Person } from '~/types/chronicle'
-import { dynastyColor, yrFmt, yrRange, toggleableDynastyBands, TIMELINE_BANDS } from '~/utils/dynasty'
+import { dynastyColor, yrFmt, yrRange, toggleableDynastyBands, TIMELINE_BANDS, dynastyRange } from '~/utils/dynasty'
 
 const props = defineProps<{
   events: ChronicleEvent[]
@@ -45,7 +45,16 @@ const EV_TIERS = [48, 122] // 事件 stem 高度(上下对称)
 const AV_TIERS = [50, 130, 210] // 人物 stem 高度(上下对称)
 const EV_JITTER = 8 // 事件每档随机上下浮动范围(px)
 const AV_JITTER = 9 // 人物每档随机上下浮动范围(px)
-const YEAR_LABEL_W = 100 // 生卒标注(人名+生卒)的最小横向间距(同侧不足则隐藏标注,避免重叠)
+
+// 生卒标注(人名 + 生卒)横向占宽:按实际文字估算(中文≈字号宽、数字/符号≈0.6em),数据无关、不写死像素。
+// 取全量有年份人物中的最大值作为相邻标注最小间距,保证放大到最大时所有标注互不重叠。
+const LABEL_CJK_W = 9.5
+const LABEL_ASCII_W = 6
+function labelTextW(s: string): number {
+  let w = 0
+  for (const ch of s) w += ch >= '一' && ch <= '鿿' ? LABEL_CJK_W : LABEL_ASCII_W
+  return w
+}
 
 // id -> [0,1) 稳定哈希:用于给"不详"事件分配稳定的随机虚拟坐标、以及确定性浮动(避免抖动)
 function hash01(id: number): number {
@@ -94,9 +103,21 @@ const filteredUndated = computed(() => {
   return undatedEvents.value.filter((e) => props.dynastyFilter.includes(dynastyColor(e.dynasty)))
 })
 
-// —— 人物(人物模式):锚定年份 = 生年(无生年则用卒年);生卒全无的集中到"不详"区块 ——
+// —— 人物(人物模式):锚定年份 —— 三个点依次判断:卒年落在自己朝代/国家区间内 → 用卒年;否则生年落在区间内 → 用生年;
+// 两者都跑出区间(或无区间)→ 用生卒中点。让人物尽量落在其朝代标签对应的时间段里(如秦人出生在战国、卒在秦朝 → 取卒年)。
+// 仍用真实年份(生/卒/中点),朝代区间来自目录/自定义朝代(dynastyRange),数据驱动、不硬编码;生卒全无的集中到"不详"区块。
 function personAnchorYear(p: Person): number | null {
-  return p.birth_year ?? p.death_year
+  const birth = p.birth_year
+  const death = p.death_year
+  if (birth == null && death == null) return null
+  const range = dynastyRange(p.dynasty, dynasties.value)
+  if (range) {
+    const inRange = (y: number | null) => y != null && y >= range.s && y <= range.e
+    if (inRange(death)) return death
+    if (inRange(birth)) return birth
+  }
+  if (birth != null && death != null) return Math.round((birth + death) / 2)
+  return birth ?? death
 }
 const datedPeople = computed(() => props.persons.filter((p) => personAnchorYear(p) != null))
 const undatedPeople = computed(() => props.persons.filter((p) => personAnchorYear(p) == null))
@@ -107,6 +128,16 @@ const filteredPeople = computed(() => {
 const filteredUndatedPeople = computed(() => {
   if (!props.dynastyFilter.length) return undatedPeople.value
   return undatedPeople.value.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty)))
+})
+
+// 人物标注(人名 + 生卒)所需的最小横向间距:取全量有年份人物中标注最宽者,再加留白。
+// 作为人物聚簇的位宽下限,放大到最大时同侧相邻头像至少拉开这么远,标注文字不重叠。
+const yearLabelW = computed(() => {
+  let m = 0
+  for (const p of datedPeople.value) {
+    m = Math.max(m, (p.name || '').length * LABEL_CJK_W, labelTextW(yrRange(p.birth_year, p.death_year)))
+  }
+  return Math.max(AV_W + AV_GAP, Math.ceil(m + 10))
 })
 
 // 自动扩展分块:事件/人物的年份落在可点亮分块(宏观 + 细分 + 自定义带年份)之外时,按朝代聚合生成新分块(用户新增内容自动扩展时间线)
@@ -204,33 +235,33 @@ function computeLayout() {
 
 const layout = computed(() => computeLayout())
 
-// —— 事件/人物聚簇(bin):相邻节点**自然像素间距**小于一个位宽时聚为一组 ——
-// 同年(同锚定年)必然聚在一起,年份接近也会聚入同一组;一组即一段"被切出"的展示长度,节点沿该段横向铺开。
-// 放大到 BIN_FULL_AT 时完全展开,组内节点互不遮挡 —— 这才是"放大到最大时所有节点都能显示"的真正来源。
-// 事件位宽 = 卡片宽,人物位宽 = 头像径(人物锚定年 = 生年 ?? 卒年)。
+// —— 同年聚簇(bin):严格按「完全同一年」分组(事件 year_start / 人物锚定年 = 生年??卒年) ——
+// 同一时间点内,节点数不超过档位容量(事件 4 / 人物 6)时全靠档位上下错开,不横向展开;
+// 超出容量时按「列优先」横向展开成多列(每列塞满档位),列间距一个位宽 —— 这才是 bin。
+// 分组只依赖年份本身、与缩放无关,收缩时每个节点塌回自己的真实年份,不再"跳到第一个时间节点"。
 interface Cluster {
   year: number
-  end: number
   evs: DatedEvent[]
   ps: Person[]
   n: number
-  minW: number
-  w: number
+  cols: number // 需要的列数(1 = 不展开)
+  w: number // bin 展开宽度(列数-1 个位宽,随缩放平滑展开)
 }
-const clusterUnit = computed(() => (props.mode === 'people' ? AV_W + AV_GAP : CARD_W + CARD_GAP))
+const clusterUnit = computed(() => (props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP))
 const clusters = computed<Cluster[]>(() => {
   const unit = clusterUnit.value
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const open = binOpen(zoom.value)
   const out: Cluster[] = []
   if (props.mode === 'people') {
     const sorted = [...filteredPeople.value].sort((a, b) => (personAnchorYear(a)! - personAnchorYear(b)!) || a.id - b.id)
     for (let i = 0; i < sorted.length; ) {
       const year = personAnchorYear(sorted[i])!
       let j = i + 1
-      while (j < sorted.length && xIn(personAnchorYear(sorted[j])!) - xIn(personAnchorYear(sorted[j - 1])!) < unit) j++
+      while (j < sorted.length && personAnchorYear(sorted[j])! === year) j++
       const ps = sorted.slice(i, j)
-      const n = ps.length
-      const minW = n * unit
-      out.push({ year, end: personAnchorYear(sorted[j - 1])!, evs: [], ps, n, minW, w: n >= 2 ? minW * binOpen(zoom.value) : 0 })
+      const cols = Math.ceil(ps.length / capacity)
+      out.push({ year, evs: [], ps, n: ps.length, cols, w: (cols - 1) * unit * open })
       i = j
     }
   } else {
@@ -238,30 +269,30 @@ const clusters = computed<Cluster[]>(() => {
     for (let i = 0; i < sorted.length; ) {
       const year = sorted[i].year_start
       let j = i + 1
-      while (j < sorted.length && xIn(sorted[j].year_start) - xIn(sorted[j - 1].year_start) < unit) j++
+      while (j < sorted.length && sorted[j].year_start === year) j++
       const evs = sorted.slice(i, j)
-      const n = evs.length
-      const minW = n * unit
-      out.push({ year, end: sorted[j - 1].year_start, evs, ps: [], n, minW, w: n >= 2 ? minW * binOpen(zoom.value) : 0 })
+      const cols = Math.ceil(evs.length / capacity)
+      out.push({ year, evs, ps: [], n: evs.length, cols, w: (cols - 1) * unit * open })
       i = j
     }
   }
   return out
 })
 
-// 实际产生位移的聚簇:组内 ≥2 个节点才展开(单个节点无需展开、不产生位移)。
-const bins = computed(() => clusters.value.filter((c) => c.n >= 2))
+// 实际产生横向位移的聚簇:只有超过档位容量(列数 > 1)的年份才展开、才把其后内容整体右移。
+const bins = computed(() => clusters.value.filter((c) => c.cols > 1))
 
-// 某年份之前所有已结束聚簇的宽度之和(后续分块、刻度、事件整体右移)。聚簇跨年份,按结束年判断是否"在其之前"。
-function shiftBefore(y: number): number {
+// 某年份之前的 bin 展开位移:纯阶梯 —— bin 展开把其后所有年份整体右移一个 bin 宽。
+// (同一时间点内不按年份线性摊开,因为 bin 只会出现在单一年份,没有"内部年份跨度"可言。)
+function deltaShift(y: number): number {
   let s = 0
-  for (const b of bins.value) if (b.end < y) s += b.w
+  for (const b of bins.value) if (y > b.year) s += b.w
   return s
 }
 
-// 年份 -> 真实像素:线性自然位置 + bin 位移,所有块/事件/人物统一按此映射。
+// 年份 -> 真实像素:线性自然位置 + 聚簇净展开位移,所有块/事件/人物统一按此映射。
 function xOf(y: number): number {
-  return xIn(y) + shiftBefore(y)
+  return xIn(y) + deltaShift(y)
 }
 
 // 仅渲染点亮的分块:熄灭的分块(骨架段或覆盖块)完全隐藏。
@@ -330,14 +361,17 @@ const undatedCards = computed(() => {
     above: i % 2 === 0,
     stem: EV_TIERS[0] + jitterFor(e.id, EV_JITTER),
     shown: true,
+    z: EV_TIERS.length,
   }))
-  // 与有年份事件一致:一条竖线只显示一个,横向间距 < unit 时隐藏后者(隐藏项保留在 DOM 中淡入淡出),
+  // 与有年份事件一致:上下两侧各自独立去重,同侧横向间距 < unit 时隐藏后者(隐藏项保留在 DOM 中淡入淡出),
   // 选中事件强制保留;放大拉开间距后逐个显现。
-  let lastX = -Infinity
-  for (const c of placed) {
-    const isSel = c.e.id === props.selectedEventId
-    c.shown = isSel || c.x - lastX >= unit
-    if (c.shown) lastX = c.x
+  for (const side of [true, false]) {
+    let lastX = -Infinity
+    for (const c of placed.filter((c) => c.above === side)) {
+      const isSel = c.e.id === props.selectedEventId
+      c.shown = isSel || c.x - lastX >= unit
+      if (c.shown) lastX = c.x
+    }
   }
   return placed
 })
@@ -356,13 +390,16 @@ const undatedPersonCards = computed(() => {
     stem: AV_TIERS[0] + jitterFor(p.id, AV_JITTER),
     showYr: false,
     shown: true,
+    z: AV_TIERS.length,
   }))
-  // 与有年份人物一致:一条竖线只显示一个,横向间距 < unit 时隐藏后者,选中人物强制保留;放大拉开间距后逐个显现。
-  let lastX = -Infinity
-  for (const c of placed) {
-    const isSel = c.p.id === props.selectedPersonId
-    c.shown = isSel || c.x - lastX >= unit
-    if (c.shown) lastX = c.x
+  // 与有年份人物一致:上下两侧各自独立去重,同侧横向间距 < unit 时隐藏后者,选中人物强制保留;放大拉开间距后逐个显现。
+  for (const side of [true, false]) {
+    let lastX = -Infinity
+    for (const c of placed.filter((c) => c.above === side)) {
+      const isSel = c.p.id === props.selectedPersonId
+      c.shown = isSel || c.x - lastX >= unit
+      if (c.shown) lastX = c.x
+    }
   }
   return placed
 })
@@ -395,34 +432,38 @@ const ticks = computed(() => {
 
 // —— 事件卡片 ——
 // 定位规则:
-//   1. 每个事件落在轴线上其所属聚簇的起点 xOf(cluster.year) 处;
-//   2. 聚簇内事件沿聚簇展开段均匀分布(放大到 BIN_FULL_AT 时完全展开,圆点各自铺开);
-//   3. 每档(上/下各 2 档)按顺序高低错开,额外带确定性随机上下浮动,增加错落感;
-//   4. 重叠隐藏:一条竖线(x)上只显示一个,横向间距不足时靠后者隐藏,放大后逐步显现。
+//   1. 全部落在真实年份 xOf(year);同一年内不超过档位容量(4)时靠上下档位错开,不横向展开;
+//   2. 同年超出容量时按「列优先」横向展开(第几列 = 序号÷容量),列间距一个位宽,随缩放平滑展开;
+//   3. 档位贪心分配:所有卡片按 x 排序后从左到右,每张先占第一个能横向放下的档位(横向间距 ≥ 位宽);
+//      收缩时相邻卡片先挤到不同档位,所有档位都放不下才隐藏 —— 充分利用上下档位,而非直接消失。
 const cards = computed(() => {
   const laneCount = EV_TIERS.length * 2
-  const placed: { e: ChronicleEvent; color: string; x: number; above: boolean; lane: number; stem: number; shown: boolean }[] = []
+  const unit = CARD_W + CARD_GAP
+  const open = binOpen(zoom.value)
+  // 展平:每个事件一个候选(先只定 x,档位随后全局贪心分配)
+  const items: { e: ChronicleEvent; color: string; x: number }[] = []
   for (const cl of clusters.value) {
-    const x0 = xOf(cl.year)
     cl.evs.forEach((e, k) => {
-      let x = x0
-      if (cl.w > 0 && cl.n > 1) x = x0 + (k / (cl.n - 1)) * cl.w
-      const lane = k % laneCount
-      const above = lane % 2 === 0
-      const tier = Math.floor(lane / 2)
-      const stem = EV_TIERS[tier] + jitterFor(e.id, EV_JITTER)
-      placed.push({ e, color: dynastyColor(e.dynasty), x, above, lane, stem, shown: true })
+      const col = Math.floor(k / laneCount)
+      items.push({ e, color: dynastyColor(e.dynasty), x: xOf(cl.year) + col * unit * open })
     })
   }
-  // 重叠隐藏:一条竖线(x)上只显示一个 —— 按横向位置去重,间距 < CARD_W+CARD_GAP 时标记 shown=false;
-  // 选中事件强制保留(确保搜索高亮一定可见)。隐藏项保留在 DOM 中,靠 opacity 过渡做淡入淡出,不再突然闪现/消失。
-  placed.sort((a, b) => a.x - b.x)
-  let lastX = -Infinity
-  for (const c of placed) {
-    const isSel = c.e.id === props.selectedEventId
-    c.shown = isSel || c.x - lastX >= CARD_W + CARD_GAP
-    if (c.shown) lastX = c.x
-  }
+  items.sort((a, b) => a.x - b.x || a.e.id - b.e.id)
+  // 全局贪心分配档位:每个档位记住最后占用的 x,横向间距 ≥ 位宽才算放下。
+  const lastX = new Array<number>(laneCount).fill(-Infinity)
+  const placed: { e: ChronicleEvent; color: string; x: number; above: boolean; stem: number; shown: boolean; z: number }[] = items.map((it) => {
+    const isSel = it.e.id === props.selectedEventId
+    let lane = -1
+    for (let l = 0; l < laneCount; l++) {
+      if (it.x - lastX[l] >= unit) { lane = l; break }
+    }
+    if (lane < 0 && isSel) lane = 0 // 选中项:全满也强制显示(压在 lane 0)
+    const shown = lane >= 0
+    if (shown) lastX[lane] = it.x
+    const l = Math.max(0, lane)
+    const tier = Math.floor(l / 2)
+    return { e: it.e, color: it.color, x: it.x, above: l % 2 === 0, stem: EV_TIERS[tier] + jitterFor(it.e.id, EV_JITTER), shown, z: laneCount / 2 - tier }
+  })
   return placed
 })
 
@@ -432,41 +473,35 @@ const allCards = computed(() => [
   ...undatedCards.value.map((c) => ({ ...c, key: 'u' + c.e.id })),
 ])
 
-// —— 人物头像(人物模式):按锚定年(生年 ?? 卒年)落在轴线上,同聚簇(bin)沿展开段横向铺开,上/下各 3 档高低错开 ——
-// 一条竖线(x)上只显示一个,横向间距不足时靠后者隐藏,选中人物强制保留;生卒标注只在横向空间足够时显示,避免重叠。
+// —— 人物头像(人物模式):全部落在真实锚定年(生年??卒年)上,同年不超档位容量(6)时靠上下档位错开 ——
+// 同年超出容量时按「列优先」横向展开;档位同样按 x 全局贪心分配(横向间距 ≥ 实测标注宽 yearLabelW),
+// 收缩时相邻人物先挤到不同档位、档位放不下才隐藏 —— 显示的每个人物都带上生卒标注且互不重叠。
 const personCards = computed(() => {
   const laneCount = AV_TIERS.length * 2
-  const placed: { p: Person; color: string; x: number; above: boolean; lane: number; stem: number; shown: boolean; showYr: boolean }[] = []
+  const unit = yearLabelW.value
+  const open = binOpen(zoom.value)
+  const items: { p: Person; color: string; x: number }[] = []
   for (const cl of clusters.value) {
-    const x0 = xOf(cl.year)
     cl.ps.forEach((p, k) => {
-      let x = x0
-      if (cl.w > 0 && cl.n > 1) x = x0 + (k / (cl.n - 1)) * cl.w
-      const lane = k % laneCount
-      const above = lane % 2 === 0
-      const tier = Math.floor(lane / 2)
-      const stem = AV_TIERS[tier] + jitterFor(p.id, AV_JITTER)
-      placed.push({ p, color: p.color || dynastyColor(p.dynasty), x, above, lane, stem, shown: true, showYr: true })
+      const col = Math.floor(k / laneCount)
+      items.push({ p, color: p.color || dynastyColor(p.dynasty), x: xOf(cl.year) + col * unit * open })
     })
   }
-  // 重叠隐藏:一条竖线(x)上只显示一个 —— 按横向位置去重,间距 < AV_W+AV_GAP 时标记 shown=false;
-  // 选中人物强制保留。放大时 bin 展开增大横向距离,被隐藏的人物逐个显现(隐藏项保留在 DOM 中做淡入淡出)。
-  placed.sort((a, b) => a.x - b.x)
-  let lastX = -Infinity
-  for (const c of placed) {
-    const isSel = c.p.id === props.selectedPersonId
-    c.shown = isSel || c.x - lastX >= AV_W + AV_GAP
-    if (c.shown) lastX = c.x
-  }
-  // 生卒标注去重叠:仅在「显示中」的人物间判断,同侧相邻标注间距不足 YEAR_LABEL_W 时隐藏后者
-  for (const side of [true, false]) {
-    const sideCards = placed.filter((c) => c.shown && c.above === side).sort((a, b) => a.x - b.x)
-    let prevX = -Infinity
-    for (const c of sideCards) {
-      if (c.x - prevX < YEAR_LABEL_W) c.showYr = false
-      else prevX = c.x
+  items.sort((a, b) => a.x - b.x || a.p.id - b.p.id)
+  const lastX = new Array<number>(laneCount).fill(-Infinity)
+  const placed: { p: Person; color: string; x: number; above: boolean; stem: number; shown: boolean; showYr: boolean; z: number }[] = items.map((it) => {
+    const isSel = it.p.id === props.selectedPersonId
+    let lane = -1
+    for (let l = 0; l < laneCount; l++) {
+      if (it.x - lastX[l] >= unit) { lane = l; break }
     }
-  }
+    if (lane < 0 && isSel) lane = 0 // 选中人物:全满也强制显示(压在 lane 0)
+    const shown = lane >= 0
+    if (shown) lastX[lane] = it.x
+    const l = Math.max(0, lane)
+    const tier = Math.floor(l / 2)
+    return { p: it.p, color: it.color, x: it.x, above: l % 2 === 0, stem: AV_TIERS[tier] + jitterFor(it.p.id, AV_JITTER), shown, showYr: shown, z: laneCount / 2 - tier }
+  })
   return placed
 })
 
@@ -480,23 +515,54 @@ const allPersonCards = computed(() => [
   ...undatedPersonCards.value.map((c) => ({ ...c, key: 'u' + c.p.id })),
 ])
 
-// 放大上限:取能满足两个条件的最小值 ——
-// 条件 1:聚簇(bin)完全展开,同一组时间接近的事件都能横向铺开显示(不被重叠隐藏);
-// 条件 2:时间跨度最小的块,放大到其宽度能放下自己的名称文字(文字宽按名称长度自动计算,兼容自定义朝代/国家)。
+// 数据项(共享):最挤的「容量+1」个事件/人物所需的最小缩放 —— 前 capacity 个由档位竖着叠,只有第 capacity+1 个才需要横向空间。
+// 对给定年份序列,取能装下「容量+1」个的最小年份跨度 D,返回 位宽 / (D × K_SPAN);同年(跨度 0)溢出归 bin 管,跳过。
+// 预留(边角):相邻年份一方 bin 展开成多列会挤占下一年的自然位置,纯年份跨度估算会略小,这里留 binMargin 余量(暂为 0)。
+function densityZoom(years: number[], unit: number, capacity: number): number {
+  const ys = [...years].sort((a, b) => a - b)
+  let D = Infinity
+  for (let i = 0; i + capacity < ys.length; i++) {
+    const span = ys[i + capacity] - ys[i]
+    if (span > 0 && span < D) D = span
+  }
+  if (!Number.isFinite(D)) return 0
+  const binMargin = 0 // 预留:同年 bin 多列 + 邻年挤压的修正项(待补)
+  return unit / (D * K_SPAN) + binMargin
+}
+
+// 放大上限(拉满):取三项的最小满足值 ——
+// 条件 1:同年溢出 bin 完全展开(固定阈值,与数据无关);
+// 条件 2(数据项):最挤的「容量+1」个事件/人物横向分开(densityZoom,见上);
+// 条件 3:所有朝代背景文字放下 —— 遍历每个块,取「文字宽 ÷ 跨度」最大者。
 const zoomMax = computed(() => {
-  const needEvents = BIN_FULL_AT
-  let minSpan = Infinity
-  let minSpanName = ''
+  const needBin = BIN_FULL_AT
+  const unit = props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const years = props.mode === 'people'
+    ? filteredPeople.value.map((p) => personAnchorYear(p)!)
+    : filteredDated.value.map((e) => e.year_start)
+  const needGap = densityZoom(years, unit, capacity)
+  let needLabel = 0
   for (const b of allBands.value) {
     const span = b.e - b.s
-    if (span > 0 && span < minSpan) {
-      minSpan = span
-      minSpanName = b.name
-    }
+    if (span > 0) needLabel = Math.max(needLabel, labelMinWidth(b.name) / (span * K_SPAN))
   }
-  const needLabel = Number.isFinite(minSpan) ? labelMinWidth(minSpanName) / (minSpan * K_SPAN) : 0
-  return Math.max(needEvents, needLabel)
+  return Math.max(needBin, needGap, needLabel)
 })
+
+// 单个分块的数据项缩放:把「数据项」限定到该块 [s,e] 区间内的事件/人物,计算块内全部可见所需的放大倍数。
+// 与全局 zoomMax 同构:max(同年 bin 展开, 块内最挤「容量+1」跨度, 块标签放下),必然 ≤ 全局 zoomMax。
+function bandDataZoom(seg: { name: string; s: number; e: number }): number {
+  const unit = props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const years = props.mode === 'people'
+    ? filteredPeople.value.filter((p) => personAnchorYear(p)! >= seg.s && personAnchorYear(p)! <= seg.e).map((p) => personAnchorYear(p)!)
+    : filteredDated.value.filter((e) => e.year_start >= seg.s && e.year_start <= seg.e).map((e) => e.year_start)
+  const needGap = densityZoom(years, unit, capacity)
+  const span = Math.max(1, seg.e - seg.s)
+  const needLabel = labelMinWidth(seg.name) / (span * K_SPAN)
+  return Math.max(BIN_FULL_AT, needGap, needLabel)
+}
 
 // 最小缩放:让整条骨架"恰好塞进视口"(全览)。绝对刻度下骨架总宽 = zoom × K_SPAN × Σ跨度 + 2×PAD,直接解出,无需二分/写死像素。
 const zoomMin = computed(() => {
@@ -517,6 +583,7 @@ let dragMoved = 0
 
 function onDown(e: MouseEvent) {
   stopZoom() // 拖拽时停止缩放循环,避免与手动横向滚动竞争
+  stopScrollAnim()
   down = true
   sx = e.clientX
   sl = wrapEl.value!.scrollLeft
@@ -547,7 +614,7 @@ function onPerson(id: number) {
 }
 
 // —— 缩放:滚轮/按钮/拉条统一以视口中心为锚点 ——
-// 锚定「年份」而非「像素」:缩放前后视口中心对应的年份保持不变。这样 bin 展开/收缩(shiftBefore 随 zoom 变化)
+// 锚定「年份」而非「像素」:缩放前后视口中心对应的年份保持不变。这样 bin 展开/收缩(deltaShift 随 zoom 变化)
 // 带来的位移也一并被修正,任何方式缩放都不会左右漂移。
 function yearAtX(x: number): number {
   const lo = axisStart
@@ -579,6 +646,7 @@ function clampZoom(z: number): number {
 
 // 启动/复用缩放循环:目标值与锚点每次调用都可更新,循环持续逼近最新目标(帧率无关)。
 function animateTo(target: number, fn: () => number, tau = 90) {
+  stopScrollAnim() // 缩放动画启动时停掉进行中的横向滚动动画,避免两套循环同时写 scrollLeft
   zoomTarget = clampZoom(target)
   scrollAt = fn
   zoomTau = tau
@@ -637,6 +705,7 @@ function onWheel(e: WheelEvent) {
   const dy = wheelDeltaY(e)
   if (Math.abs(dx) > Math.abs(dy)) {
     stopZoom() // 平移前停掉进行中的缩放循环,避免逐帧重设 scrollLeft 覆盖手动平移
+    stopScrollAnim()
     wrap.scrollLeft += dx
   } else {
     const cx = wrap.clientWidth / 2
@@ -654,7 +723,115 @@ function onZoomInput(e: Event) {
 }
 const zoomStepSize = computed(() => Math.max(0.001, (zoomMax.value - zoomMin.value) / 500))
 
-function focusBand(seg: { s: number; e: number; w: number; x0: number; x1: number }) {
+// —— 底部居中左右滑动便捷条(左右按钮 + 会"滚动"的齿轮侧面) ——
+// 整条滑条就是齿轮的侧面:通体竖线 = 轮齿,四周(上下左右)渐隐到透明;
+// 齿纹随位置平移(background-position-x),像齿轮表面在滚动,页面随之左右移动。
+const ROLL_PX = 140 // 全程(0..1)齿纹平移的像素量(约 14 个齿距)
+const TRACK_WHEEL_SPEED = 3 // 齿轮上滑动比页面滑动更快:小控件代表整条时间线,快速拖过
+const scrollMax = computed(() => Math.max(0, totalW.value - viewW.value))
+// 齿纹位置独立维护(px):抓取(直接操作)时齿纹跟手向右,滑动/按钮/内容滚动(间接)时齿纹与内容反向 ——
+// 两种交互方向相反,不能由 scrollRatio 纯函数推导,改为状态 gearPos 累积。
+const gearPos = ref(0)
+let gearDragging = false
+const gearTeethScale = computed(() => (scrollMax.value > 0 ? ROLL_PX / scrollMax.value : 0))
+// 非抓取来源的滚动(滑动/按钮/内容拖拽/缩放等):齿纹反向平移,像内容从齿轮下穿过。
+watch(scrollLeft, (nv, ov) => {
+  if (gearDragging) return
+  gearPos.value -= (nv - ov) * gearTeethScale.value
+})
+const rollerStyle = computed(() => ({
+  backgroundPositionX: `${gearPos.value.toFixed(1)}px`,
+}))
+// —— 平滑横向滚动(左右按钮):与缩放循环同款指数缓动,帧率无关 ——
+let scrollTarget = 0
+let scrollTau = 160
+let scrollRaf = 0
+
+function stopScrollAnim() {
+  if (scrollRaf) {
+    cancelAnimationFrame(scrollRaf)
+    scrollRaf = 0
+  }
+}
+
+// 目标值可随时更新,由同一循环持续跟随;逼近到 0.5px 内即吸附到位并停帧。
+function smoothScrollTo(target: number, tau = 160) {
+  stopZoom() // 与缩放循环互斥,避免两套逐帧写 scrollLeft 竞争
+  scrollTarget = Math.min(scrollMax.value, Math.max(0, target))
+  scrollTau = tau
+  if (scrollRaf) return
+  let last = performance.now()
+  const step = (now: number) => {
+    const dt = Math.min(64, now - last)
+    last = now
+    const wrap = wrapEl.value!
+    const diff = scrollTarget - wrap.scrollLeft
+    if (Math.abs(diff) < 0.5) {
+      wrap.scrollLeft = scrollTarget
+      scrollRaf = 0
+      return
+    }
+    wrap.scrollLeft += diff * (1 - Math.exp(-dt / scrollTau))
+    scrollRaf = requestAnimationFrame(step)
+  }
+  scrollRaf = requestAnimationFrame(step)
+}
+
+function scrollStep(dir: number) {
+  if (scrollMax.value <= 0) return
+  const step = Math.max(90, viewW.value * 0.6)
+  smoothScrollTo((wrapEl.value?.scrollLeft ?? 0) + dir * step)
+}
+function applyScrollRatio(t: number) {
+  const wrap = wrapEl.value
+  if (!wrap) return
+  stopScrollAnim() // 齿轮拖拽直接接管位置,停掉按钮动画
+  wrap.scrollLeft = Math.min(scrollMax.value, Math.max(0, t * scrollMax.value))
+}
+const scrollTrackEl = ref<HTMLElement | null>(null)
+let lastGearX = 0
+// 指针横坐标 → 0..1(整条滚轮满宽,直接线性映射)
+function gearRatioAt(e: PointerEvent): number {
+  const el = scrollTrackEl.value
+  if (!el) return 0
+  const rect = el.getBoundingClientRect()
+  if (rect.width <= 0) return 0
+  return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+}
+function onGearDown(e: PointerEvent) {
+  if (scrollMax.value <= 0) return
+  e.preventDefault()
+  gearDragging = true
+  lastGearX = e.clientX
+  stopZoom()
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  applyScrollRatio(gearRatioAt(e))
+}
+function onGearMove(e: PointerEvent) {
+  if (!gearDragging) return
+  const dx = e.clientX - lastGearX
+  lastGearX = e.clientX
+  gearPos.value += dx // 抓取:齿纹直接跟手(1:1),与滑动方向相反
+  applyScrollRatio(gearRatioAt(e))
+}
+function onGearUp(e: PointerEvent) {
+  if (!gearDragging) return
+  gearDragging = false
+  try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch {}
+}
+
+// 齿轮上左右滑动(触控板横滑/横向滚轮)也驱动横向滚动,不用抓取也能移动
+function onTrackWheel(e: WheelEvent) {
+  if (scrollMax.value <= 0) return
+  stopZoom()
+  stopScrollAnim()
+  const dx = wheelDeltaX(e)
+  const dy = wheelDeltaY(e)
+  const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy
+  wrapEl.value!.scrollLeft = Math.min(scrollMax.value, Math.max(0, wrapEl.value!.scrollLeft + delta * TRACK_WHEEL_SPEED))
+}
+
+function focusBand(seg: { name: string; s: number; e: number; w: number; x0: number; x1: number }) {
   if (dragMoved > 6) return
   const vw = wrapEl.value!.clientWidth
   if (focusedS === seg.s) {
@@ -663,8 +840,8 @@ function focusBand(seg: { s: number; e: number; w: number; x0: number; x1: numbe
     animateTo(1, () => (totalW.value - vw) / 2, 420)
   } else {
     focusedS = seg.s
-    const span = Math.max(1, seg.e - seg.s) * K_SPAN
-    const targetZoom = clampZoom(vw / span)
+    // 点击分块:放大到「块内全部事件/人物可见」所需的放大倍数(bandDataZoom),而非铺满视口。
+    const targetZoom = clampZoom(bandDataZoom(seg))
     // 用分块起止年的实时像素(X 随当前 zoom 逐帧重算)作为滚动目标,保证聚焦跟随缩放、不漂移到左端
     animateTo(targetZoom, () => (xOf(seg.s) + xOf(seg.e)) / 2 - vw / 2, 420)
   }
@@ -679,7 +856,7 @@ function focusEvent(id: number) {
   const vw = wrapEl.value.clientWidth
   let targetZoom = clampZoom(Math.max(zoom.value, 1))
   if (e.year_start != null) {
-    const bin = bins.value.find((b) => b.year <= e.year_start && e.year_start <= b.end)
+    const bin = bins.value.find((b) => b.year === e.year_start)
     if (bin) targetZoom = clampZoom(Math.max(zoom.value, BIN_FULL_AT))
   }
   if (e.year_start == null) {
@@ -739,6 +916,7 @@ watch(
       flowOn.value = false
       if (flowTimer) { clearTimeout(flowTimer); flowTimer = null }
       stopZoom()
+      stopScrollAnim()
       return
     }
     await nextTick()
@@ -757,6 +935,7 @@ watch(
 
 onBeforeUnmount(() => {
   stopZoom()
+  stopScrollAnim()
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -801,7 +980,7 @@ onBeforeUnmount(() => {
         <span>{{ yrFmt(y) }}</span>
       </div>
       <div v-for="b in binSegs" :key="'bin' + b.year" class="tl-bin" :style="{ left: b.x0 + 'px', width: b.w + 'px' }">
-        <span class="tl-bin-lab">{{ yrRange(b.year, b.end) }}</span>
+        <span class="tl-bin-lab">{{ yrFmt(b.year) }}</span>
       </div>
       <Transition name="tl-mode" mode="out-in">
         <div v-if="mode === 'events'" key="events" class="tl-mode-layer">
@@ -810,11 +989,10 @@ onBeforeUnmount(() => {
             :key="c.key"
             class="tl-ev"
             :class="{ sel: c.e.id === selectedEventId, above: c.above, below: !c.above, hide: !c.shown }"
-            :style="{ left: c.x + 'px', '--dc': c.color, '--stem': c.stem + 'px' }"
-            @click.stop="onCard(c.e.id)"
+            :style="{ left: c.x + 'px', '--dc': c.color, '--stem': c.stem + 'px', '--z': c.z }"
           >
             <template v-if="c.above">
-              <div class="bx">
+              <div class="bx" @click.stop="onCard(c.e.id)">
                 <div class="t">{{ c.e.title }}</div>
                 <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
               </div>
@@ -826,7 +1004,7 @@ onBeforeUnmount(() => {
               <span v-if="c.e.year_start != null" class="tl-ev-yr">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</span>
               <div class="nd"></div>
               <div class="stem"></div>
-              <div class="bx">
+              <div class="bx" @click.stop="onCard(c.e.id)">
                 <div class="t">{{ c.e.title }}</div>
                 <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
               </div>
@@ -839,8 +1017,7 @@ onBeforeUnmount(() => {
             :key="c.key"
             class="tl-person"
             :class="{ sel: c.p.id === selectedPersonId, above: c.above, below: !c.above, hide: !c.shown }"
-            :style="{ left: c.x + 'px', '--dc': c.color, '--stem': c.stem + 'px' }"
-            @click.stop="onPerson(c.p.id)"
+            :style="{ left: c.x + 'px', '--dc': c.color, '--stem': c.stem + 'px', '--z': c.z }"
           >
             <template v-if="c.above">
               <div class="tl-person-pop">
@@ -851,7 +1028,7 @@ onBeforeUnmount(() => {
                 <p v-if="c.p.summary" class="sm">{{ c.p.summary }}</p>
                 <div v-if="personTags(c.p).length" class="tg"><span v-for="t in personTags(c.p)" :key="t">{{ t }}</span></div>
               </div>
-              <button class="tl-av" :aria-label="c.p.name">
+              <button class="tl-av" :aria-label="c.p.name" @click.stop="onPerson(c.p.id)">
                 <img v-if="c.p.avatar_url" :src="c.p.avatar_url" alt="" />
                 <span v-else>{{ c.p.name[0] }}</span>
               </button>
@@ -863,7 +1040,7 @@ onBeforeUnmount(() => {
               <span v-if="c.showYr" class="tl-person-yr"><b>{{ c.p.name }}</b><br>{{ yrRange(c.p.birth_year, c.p.death_year) }}</span>
               <div class="nd"></div>
               <div class="tl-person-stem"></div>
-              <button class="tl-av" :aria-label="c.p.name">
+              <button class="tl-av" :aria-label="c.p.name" @click.stop="onPerson(c.p.id)">
                 <img v-if="c.p.avatar_url" :src="c.p.avatar_url" alt="" />
                 <span v-else>{{ c.p.name[0] }}</span>
               </button>
@@ -893,5 +1070,26 @@ onBeforeUnmount(() => {
       @input="onZoomInput"
     />
     <button class="zl-btn" title="放大" aria-label="放大" @click="zoomStep(1)">+</button>
+  </div>
+  <div v-if="active" class="tl-scroll">
+    <button class="tl-scroll-btn" title="向左" aria-label="向左" @click="scrollStep(-1)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+    <div
+      class="tl-scroll-track"
+      ref="scrollTrackEl"
+      aria-label="横向滚动位置"
+      @pointerdown="onGearDown"
+      @pointermove="onGearMove"
+      @pointerup="onGearUp"
+      @pointercancel="onGearUp"
+      @wheel.prevent="onTrackWheel"
+    >
+      <div class="tl-scroll-roller" :style="rollerStyle"></div>
+      <div class="tl-scroll-light"></div>
+    </div>
+    <button class="tl-scroll-btn" title="向右" aria-label="向右" @click="scrollStep(1)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+    </button>
   </div>
 </template>

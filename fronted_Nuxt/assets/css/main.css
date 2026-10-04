@@ -22,13 +22,14 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 #graphWrap:active{cursor:grabbing}
 #graphWrap canvas{display:block}
 
-/* ---------- 左上角视图切换栏(两个独立小圆按钮,放朝代选框右侧) ---------- */
-.lib-btn{position:fixed;left:18px;top:18px;z-index:50;width:26px;height:26px;border-radius:50%;
+/* ---------- 左上角工具栏:库按钮 + 朝代选框 + 视图切换(胶囊宽度自适应,右侧按钮跟随平滑右移) ---------- */
+.topbar{position:fixed;top:18px;left:18px;z-index:50;display:flex;align-items:center;gap:12px}
+.lib-btn{flex-shrink:0;width:26px;height:26px;border-radius:50%;
   border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);backdrop-filter:blur(20px);cursor:pointer;
   font-size:14px;display:grid;place-items:center;color:rgba(255,255,255,.45);
-  transition:all .22s cubic-bezier(.32,.72,.35,1);position:relative;font-family:inherit;box-shadow:none;padding:0}
+  transition:all .22s cubic-bezier(.32,.72,.35,1);font-family:inherit;box-shadow:none;padding:0}
 .lib-btn:hover{color:#fff;transform:scale(1.1);background:rgba(255,255,255,.14)}
-.rail{position:fixed;left:220px;top:18px;z-index:50;display:flex;flex-direction:row;gap:8px}
+.rail{flex-shrink:0;display:flex;flex-direction:row;gap:8px}
 .rail button{width:26px;height:26px;border-radius:50%;border:1px solid rgba(255,255,255,.08);
   background:rgba(255,255,255,.05);backdrop-filter:blur(20px);cursor:pointer;
   font-size:14px;display:grid;place-items:center;color:rgba(255,255,255,.45);
@@ -64,7 +65,7 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 }
 
 /* [新增] 时间线模式胶囊开关(事件 / 人物):进入时间线视图后出现在视图切换栏右侧 */
-.tl-mode-switch{position:fixed;left:290px;top:18px;z-index:50;display:flex;align-items:center;gap:2px;
+.tl-mode-switch{flex-shrink:0;display:flex;align-items:center;gap:2px;
   background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:999px;
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:2px}
 .tl-mode-switch button{height:22px;padding:0 13px;border:none;border-radius:999px;background:transparent;
@@ -107,26 +108,29 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .search-empty{padding:10px 12px;font-size:12px;color:rgba(255,255,255,.4)}
 
 /* ---------- 关系网:朝代下拉选框(胶囊) ---------- */
-.g-select{position:fixed;top:18px;left:52px;z-index:20;font-size:12.5px;color:rgba(255,255,255,.82)}
-.g-trigger{display:flex;align-items:center;gap:7px;width:150px;height:26px;padding:0 12px;border-radius:99px;
+.g-select{position:relative;flex-shrink:0;z-index:20;font-size:12.5px;color:rgba(255,255,255,.82)}
+.g-select.open{width:180px}
+.g-trigger{display:flex;align-items:center;gap:7px;width:100%;min-width:150px;height:26px;padding:0 16px;border-radius:99px;overflow:hidden;
   background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12);
-  cursor:pointer;transition:background .2s,border-color .2s,color .2s,transform .1s;font-family:inherit;color:inherit;font-size:inherit;
+  cursor:pointer;transition:background .2s,border-color .2s,color .2s,transform .1s;font-family:inherit;color:inherit;font-size:inherit;white-space:nowrap;
   box-shadow:0 1px 3px rgba(0,0,0,.14)}
 .g-trigger:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.2);color:#fff}
 .g-trigger:active{transform:scale(.97)}
 .g-trigger:focus-visible{outline:2px solid rgba(10,132,255,.7);outline-offset:2px}
 .g-trigger i{width:10px;height:10px;border-radius:50%;background:#8e8e93;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.1)}
+/* 胶囊平滑加宽:标签文字在动画中收缩裁切(不挤压右侧 caret),不出现省略号 */
+.g-trigger > span{min-width:0;overflow:hidden;white-space:nowrap}
 .g-trigger .caret{flex-shrink:0;margin-left:auto;color:rgba(255,255,255,.55);transition:transform .25s cubic-bezier(.32,.72,.35,1),color .2s}
 .g-trigger:hover .caret{color:#fff}
 .g-trigger .caret.open{transform:rotate(180deg)}
-.g-search{cursor:text}
+.g-search{cursor:text;width:100%}
 .g-search:active{transform:none}
 .g-search:focus-within{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.24)}
 .g-search .dyn-input{flex:1;min-width:0;border:none;background:none;outline:none;font-size:inherit;color:inherit;font-family:inherit;padding:0}
 .g-search .dyn-input::placeholder{color:rgba(255,255,255,.35)}
 .g-search .dyn-close{flex-shrink:0;width:16px;height:16px;border:none;border-radius:50%;background:rgba(255,255,255,.12);color:inherit;cursor:pointer;display:grid;place-items:center;padding:0;transition:background .15s}
 .g-search .dyn-close:hover{background:rgba(255,255,255,.24)}
-.g-menu{position:absolute;top:34px;left:0;width:156px;max-height:240px;overflow-y:auto;background:rgba(28,30,38,.96);backdrop-filter:blur(24px);
+.g-menu{position:absolute;top:34px;left:0;width:max-content;min-width:160px;max-width:min(60vw,340px);max-height:240px;overflow-y:auto;background:rgba(28,30,38,.96);backdrop-filter:blur(24px);
   border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:6px;box-shadow:0 12px 36px rgba(0,0,0,.42),0 2px 8px rgba(0,0,0,.28);color:#fff;
   transform-origin:top left;animation:gpop .18s cubic-bezier(.32,.72,.35,1)}
 @keyframes gpop{from{opacity:0;transform:translateY(-5px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
@@ -134,7 +138,6 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-item:hover{background:rgba(255,255,255,.09)}
 .g-item.on{background:rgba(10,132,255,.18);color:#fff}
 .g-item i{width:11px;height:11px;border-radius:50%;flex-shrink:0}
-.g-item i.all{background:transparent;border:1.5px solid rgba(255,255,255,.55)}
 /* 朝代"点亮/熄灭"按钮:颜色圆圈 = 开关,点亮带同色光晕、熄灭置灰(无勾选标记) */
 .g-light{width:11px;height:11px;border-radius:50%;flex-shrink:0;border:none;padding:0;cursor:pointer;
   box-shadow:0 0 0 2px rgba(255,255,255,.2),
@@ -164,7 +167,9 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-add:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.4);color:#fff}
 .g-divider{height:1px;margin:6px 4px;background:rgba(255,255,255,.12)}
 .g-item.g-custom{gap:6px}
-.g-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 文字右侧多留一点间距:朝代名与编辑/删除按钮之间再宽一点(仅右侧,不动左侧色块) */
+.g-item.g-custom .g-name + .g-row-btn{margin-left:8px}
+.g-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .g-edit-row{display:flex;align-items:center;gap:6px;padding:5px 8px;margin-bottom:4px}
 .g-edit-inp{flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:6px;
   color:#fff;font-size:12.5px;font-family:inherit;padding:5px 8px;outline:none}
@@ -195,7 +200,8 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .g-item > .g-row-btn.g-del.on{opacity:1}
 
 /* ---------- 时间线 ---------- */
-.tl-wrap{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;cursor:grab;user-select:none;-webkit-user-select:none}
+.tl-wrap{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;cursor:grab;user-select:none;-webkit-user-select:none;scrollbar-width:none}
+.tl-wrap::-webkit-scrollbar{display:none}
 .tl-canvas{position:relative;height:100%}
 .dyn-band{position:absolute;top:0;bottom:0;cursor:pointer;overflow:hidden}
 .dyn-band::before{content:"";position:absolute;inset:0;
@@ -223,10 +229,10 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .tl-tick span{position:absolute;top:17px;left:-28px;width:60px;text-align:center;font-family:var(--mono);font-size:9.5px;color:rgba(255,255,255,.46)}
 .tl-bin{position:absolute;top:50%;height:4px;margin-top:-2px;border-radius:3px;background:var(--accent);opacity:.55;pointer-events:none}
 .tl-bin-lab{position:absolute;top:16px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:10px;font-weight:600;color:var(--accent);white-space:nowrap}
-.tl-ev{position:absolute;width:150px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease}
+.tl-ev{position:absolute;width:150px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease;z-index:calc(var(--z,1)*10)}
 .tl-ev.above{bottom:calc(50% - 5.5px)}
 .tl-ev.below{top:calc(50% - 5.5px)}
-.tl-ev .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer;transition:transform .15s;flex:0 0 auto}
+.tl-ev .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4),0 0 6px color-mix(in srgb,var(--dc) 65%,transparent),0 0 12px color-mix(in srgb,var(--dc) 35%,transparent);cursor:pointer;transition:transform .15s;flex:0 0 auto}
 .tl-ev .stem{width:1px;height:var(--stem,62px);background:var(--dc);opacity:.4;flex:0 0 auto}
 .tl-ev .bx{width:150px;box-sizing:border-box;background:rgba(20,24,34,.92);border:1px solid var(--dc);border-radius:11px;box-shadow:0 4px 16px rgba(0,0,0,.3);padding:8px 11px;cursor:pointer;transition:all .15s;color:#f5f5f7}
 .tl-ev:hover .bx{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
@@ -237,14 +243,15 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .tl-ev.above .tl-ev-yr{top:100%;margin-top:6px}
 .tl-ev.below .tl-ev-yr{bottom:100%;margin-bottom:6px}
 .tl-ev.sel .bx{outline:2px solid var(--accent)}
+.tl-ev:hover{z-index:40}
 
 /* [新增] 时间线人物头像(人物模式):圆形头像落在轴线上,悬停放大弹出 + 玻璃简介弹窗 */
-.tl-person{position:absolute;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease}
-.tl-person:hover{z-index:5}
+.tl-person{position:absolute;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:opacity .22s ease;z-index:calc(var(--z,1)*10)}
+.tl-person:hover{z-index:40}
 .tl-person.above{bottom:calc(50% - 5.5px)}
 .tl-person.below{top:calc(50% - 5.5px)}
 .tl-person .tl-person-stem{width:1px;height:var(--stem,30px);background:var(--dc);opacity:.4;flex:0 0 auto}
-.tl-person .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer;transition:transform .15s;flex:0 0 auto}
+.tl-person .nd{width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4),0 0 6px color-mix(in srgb,var(--dc) 65%,transparent),0 0 12px color-mix(in srgb,var(--dc) 35%,transparent);cursor:pointer;transition:transform .15s;flex:0 0 auto}
 .tl-person:hover .nd{transform:scale(1.3)}
 .tl-person .tl-av{width:56px;height:56px;border-radius:50%;border:2px solid #0d1117;background:var(--dc);
   color:#fff;font-size:23px;font-weight:700;cursor:pointer;display:grid;place-items:center;overflow:hidden;
@@ -282,13 +289,13 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .tl-mode-enter-from,.tl-mode-leave-to{opacity:0}
 
 /* ---------- 时间线右下角缩放控件(实体按钮 + 拉条) ---------- */
-.tl-zoom{position:fixed;right:22px;bottom:20px;z-index:70;display:flex;align-items:center;gap:10px;
-  padding:8px 12px;border-radius:999px;background:rgba(20,24,34,.34);backdrop-filter:blur(16px) saturate(130%);
+.tl-zoom{position:fixed;right:22px;bottom:20px;z-index:70;display:flex;align-items:center;gap:6px;
+  padding:5px 8px;border-radius:999px;background:rgba(20,24,34,.34);backdrop-filter:blur(16px) saturate(130%);
   -webkit-backdrop-filter:blur(16px) saturate(130%);border:1px solid rgba(255,255,255,.07);box-shadow:0 4px 14px rgba(0,0,0,.22);
   opacity:.5;transition:opacity .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease}
 .tl-zoom:hover{opacity:1;background:rgba(20,24,34,.82);backdrop-filter:blur(20px) saturate(140%);
   -webkit-backdrop-filter:blur(20px) saturate(140%);border-color:rgba(255,255,255,.1);box-shadow:0 6px 24px rgba(0,0,0,.4)}
-.tl-zoom .zl-btn{width:30px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+.tl-zoom .zl-btn{width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
   border:1px solid rgba(255,255,255,.14);border-radius:50%;background:rgba(255,255,255,.06);color:rgba(255,255,255,.82);
   font-size:16px;line-height:1;cursor:pointer;transition:background .15s,transform .1s,border-color .15s,color .15s}
 .tl-zoom .zl-btn:hover{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3)}
@@ -298,6 +305,37 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .tl-zoom .zl-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;
   background:var(--accent);border:2px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer}
 .tl-zoom .zl-range::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:2px solid #0d1117;cursor:pointer}
+
+/* ---------- 时间线底部居中左右滑动便捷条(左右按钮 + 齿轮滚轮) ---------- */
+.tl-scroll{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:70;display:flex;align-items:center;gap:6px;
+  padding:5px 8px;border-radius:999px;background:rgba(20,24,34,.34);backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);border:1px solid rgba(255,255,255,.07);box-shadow:0 4px 14px rgba(0,0,0,.22);
+  opacity:.5;transition:opacity .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.tl-scroll:hover{opacity:1;background:rgba(20,24,34,.82);backdrop-filter:blur(20px) saturate(140%);
+  -webkit-backdrop-filter:blur(20px) saturate(140%);border-color:rgba(255,255,255,.1);box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.tl-scroll .tl-scroll-btn{width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  border:1px solid rgba(255,255,255,.14);border-radius:50%;background:rgba(255,255,255,.06);color:rgba(255,255,255,.82);
+  cursor:pointer;transition:background .15s,transform .1s,border-color .15s,color .15s}
+.tl-scroll .tl-scroll-btn:hover{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3)}
+.tl-scroll .tl-scroll-btn:active{transform:scale(.9)}
+/* 齿轮侧面滚轮:细竖线轮齿,四周(上下左右)渐隐到全透明 */
+.tl-scroll .tl-scroll-track{position:relative;width:170px;height:18px;flex:0 0 auto;cursor:grab;touch-action:none;background:transparent}
+.tl-scroll .tl-scroll-track:active{cursor:grabbing}
+.tl-scroll .tl-scroll-roller{position:absolute;inset:0;
+  background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.5) 0 1px,rgba(255,255,255,0) 1px 10px)}
+.tl-scroll .tl-scroll-light{position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.22) 50%,transparent 100%)}
+/* 四周渐隐:左右 18%、上下 35% 淡出到透明,两轴相交(intersect)后四边同时归零 */
+.tl-scroll .tl-scroll-roller,
+.tl-scroll .tl-scroll-light{
+  -webkit-mask-image:
+    linear-gradient(90deg,transparent 0%,#000 18%,#000 82%,transparent 100%),
+    linear-gradient(180deg,transparent 0%,#000 35%,#000 65%,transparent 100%);
+  -webkit-mask-composite:source-in;
+  mask-image:
+    linear-gradient(90deg,transparent 0%,#000 18%,#000 82%,transparent 100%),
+    linear-gradient(180deg,transparent 0%,#000 35%,#000 65%,transparent 100%);
+  mask-composite:intersect}
 
 /* ---------- 人物抽屉(深色玻璃 · 同添加面板) ---------- */
 .drawer{position:fixed;top:14px;right:14px;bottom:14px;width:372px;

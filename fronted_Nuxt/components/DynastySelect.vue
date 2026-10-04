@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CustomDynasty, Person } from '~/types/chronicle'
-import { DYNASTY_CATALOG, hashColor, dynastyRange, rangeLabel, rangesOverlap, toggleableDynastyBands, parseYear, sanitizeYearEl } from '~/utils/dynasty'
+import { DYNASTY_CATALOG, TIMELINE_BANDS, hashColor, dynastyRange, rangeLabel, rangesOverlap, toggleableDynastyBands, defaultUnlitDynastyNames, parseYear, sanitizeYearEl } from '~/utils/dynasty'
 
 // 全局"朝代/国家"筛选选框:关系网与时间线共用,支持多选打勾(点一下选中,再点取消)。
 // 选中朝代颜色数组由父组件持有(v-model),分别驱动关系网的边/节点高亮与时间线的事件过滤。
@@ -14,6 +14,9 @@ const emit = defineEmits<{
 
 const { dynasties, create, update, remove } = useDynasties()
 const toast = useToast()
+
+// 内置朝代名全集(目录细分 + 宏观色带):添加/编辑时判重,「汉/晋」等仅存在于色带的朝代名也算已存在。
+const builtinNames = new Set([...DYNASTY_CATALOG.map((d) => d.name), ...TIMELINE_BANDS.map((b) => b.name)])
 
 const open = ref(false)
 const query = ref('')
@@ -115,6 +118,52 @@ function lightTitle(name: string): string {
   return rng ? `${base}（${rng}）:在${scope}${act}` : `${base}:在${scope}${act}`
 }
 
+// —— 全部点亮/熄灭:控制关系网(全部人物)/时间线(全部时间块)的展示 ——
+// 可点亮/熄灭的全部朝代名(有"点亮"按钮的):内置全部 + 自定义(关系网全部,时间线仅带起止年的)。
+const toggleableNames = computed<string[]>(() => {
+  const names = new Set(builtinLegend.value.map((b) => b.name))
+  for (const d of dynasties.value) {
+    if (props.mode === 'graph' || hasRange(d.name)) names.add(d.name)
+  }
+  return [...names]
+})
+
+// 时间线"默认时间块":同一时间段只展示一个朝代,重叠的细分朝代默认熄灭(宏观分块点亮)。
+const defaultUnlit = computed(() => defaultUnlitDynastyNames(dynasties.value))
+
+// "全部"是否点亮:关系网 = 无任何熄灭;时间线 = 处于默认时间块(宏观分块全亮、重叠细分熄灭)。
+const allLit = computed(() => {
+  if (props.mode === 'timeline') {
+    const a = props.unlit
+    const b = defaultUnlit.value
+    if (a.length !== b.length) return false
+    const s = new Set(b)
+    return a.every((n) => s.has(n))
+  }
+  return props.unlit.length === 0
+})
+
+function allLightTitle(): string {
+  if (props.mode === 'timeline') {
+    return allLit.value ? '熄灭全部:隐藏所有时间块' : '点亮全部:恢复默认时间块(同一时间段只展示一个)'
+  }
+  return allLit.value ? '熄灭全部:隐藏所有人物' : '点亮全部:展示所有人物'
+}
+
+function toggleAllLight() {
+  if (allLit.value) {
+    // 熄灭全部:隐藏所有可点亮朝代(内置 + 自定义)
+    emit('update:unlit', toggleableNames.value)
+  } else if (props.mode === 'timeline') {
+    // 时间线"点亮全部" = 恢复默认时间块(同一时间段只展示一个朝代/国家),并弹提示
+    emit('update:unlit', defaultUnlit.value)
+    toast.show('已恢复默认时间块:同一时间段只展示一个朝代/国家')
+  } else {
+    // 关系网"点亮全部" = 展示所有人物
+    emit('update:unlit', [])
+  }
+}
+
 // —— 悬浮提示:条目上悬浮显示时间段(Teleport 到 body,避免被下拉菜单 overflow 裁剪)——
 const tip = ref<{ text: string; x: number; y: number } | null>(null)
 function showTip(e: MouseEvent, name: string) {
@@ -156,13 +205,13 @@ function startAdd() {
 const newDup = computed(() => {
   const n = newName.value.trim()
   if (!n) return false
-  return DYNASTY_CATALOG.some((d) => d.name === n) || dynasties.value.some((d) => d.name === n)
+  return builtinNames.has(n) || dynasties.value.some((d) => d.name === n)
 })
 
 async function confirmAdd() {
   const name = newName.value.trim()
   if (!name) return
-  if (DYNASTY_CATALOG.some((d) => d.name === name)) {
+  if (builtinNames.has(name)) {
     toast.show('内置朝代/国家已存在,无需添加')
     return
   }
@@ -207,7 +256,7 @@ async function confirmEdit() {
   const id = editingId.value
   const name = editName.value.trim()
   if (id == null || !name) return
-  if (DYNASTY_CATALOG.some((d) => d.name === name)) {
+  if (builtinNames.has(name)) {
     toast.show('内置朝代/国家名不可用')
     return
   }
@@ -268,10 +317,56 @@ function onDocClick(e: MouseEvent) {
 
 onMounted(() => document.addEventListener('click', onDocClick))
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+
+// —— 胶囊宽度平滑过渡:标签(选中朝代数/名)或搜索框开合变化时,从旧宽度 FLIP 过渡到新宽度,避免跳变 ——
+// 动画作用于 .g-select 容器(内层 .g-trigger/.g-search 用 width:100% 跟随),右侧按钮经 flex 重排自然同步右移。
+const selectEl = ref<HTMLDivElement | null>(null)
+let lastSelW = 0
+let widthTimer: ReturnType<typeof setTimeout> | null = null
+
+function animateSelectWidth() {
+  const el = selectEl.value
+  if (!el) return
+  const newW = el.getBoundingClientRect().width
+  if (Math.abs(newW - lastSelW) < 0.5) {
+    lastSelW = newW
+    return
+  }
+  const from = lastSelW
+  lastSelW = newW
+  el.style.transition = 'none'
+  el.style.width = `${from}px`
+  void el.offsetWidth
+  el.style.transition = 'width .45s cubic-bezier(.32,.72,.35,1)'
+  el.style.width = `${newW}px`
+  if (widthTimer) clearTimeout(widthTimer)
+  widthTimer = setTimeout(() => {
+    const e = selectEl.value
+    if (e) {
+      e.style.transition = 'none'
+      e.style.width = ''
+      void e.offsetWidth
+      e.style.transition = ''
+    }
+  }, 490)
+}
+
+watch(triggerLabel, () => nextTick(animateSelectWidth))
+watch(open, () => nextTick(animateSelectWidth))
+
+onMounted(() => {
+  nextTick(() => {
+    const el = selectEl.value
+    if (el) lastSelW = el.getBoundingClientRect().width
+  })
+})
+onBeforeUnmount(() => {
+  if (widthTimer) clearTimeout(widthTimer)
+})
 </script>
 
 <template>
-  <div class="g-select">
+  <div class="g-select" ref="selectEl" :class="{ open }">
     <button v-if="!open" class="g-trigger" @click.stop="openMenu">
       <i :style="{ background: triggerDot }"></i>
       <span>{{ triggerLabel }}</span>
@@ -327,7 +422,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
       <!-- 全部 -->
       <div class="g-item" :class="{ on: !modelValue.length }" @click.stop="pickAll">
-        <i class="all"></i>全部
+        <button
+          class="g-light"
+          :class="{ off: !allLit }"
+          :style="{ background: '#d8d8de', '--lc': '#d8d8de' }"
+          :title="allLightTitle()"
+          @click.stop="toggleAllLight"
+        ></button>
+        <span class="g-name">全部</span>
         <svg class="ck" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
       </div>
 

@@ -100,10 +100,14 @@ function onSelectPerson(id: number) {
   openPerson(id)
 }
 
-// 点击关系网空白处:关闭人物抽屉与事件卡片
+// 点击关系网空白处:回退一步 —— 先退出人物/事件聚焦(背景朝代筛选仍在,朝代高亮随之恢复),再退回自由视角(清除朝代筛选)
 function onBlank() {
-  closePerson()
-  closeEvent()
+  if (selectedPersonId.value != null || selectedEventId.value != null) {
+    closePerson()
+    closeEvent()
+  } else if (dynastyFilter.value.length) {
+    dynastyFilter.value = []
+  }
 }
 
 // 时间线/其它:点击事件聚焦首要参与人物,让对应的人在关系网中可见
@@ -150,8 +154,13 @@ function filterDynasty(color: string) {
   else dynastyFilter.value = [...dynastyFilter.value, color]
 }
 
-// 切换朝代/国家筛选时,人物详情抽屉右滑退出(覆盖 DynastySelect v-model 与 SearchBar 两个入口)
-watch(dynastyFilter, () => closePerson())
+// 人物高亮与朝代筛选互斥(仅显示层):关系网里人物聚焦优先、朝代作为背景被压暗;
+// 但朝代筛选本身保留(不清空),点空白回退时恢复朝代高亮。
+// 反向:切朝代/国家筛选时关闭人物抽屉(覆盖 DynastySelect v-model 与 SearchBar)。
+// 仅在筛选非空时关闭:清空筛选(点空白回退到自由视角)不应反过来关闭刚打开的人物。
+watch(dynastyFilter, (filter) => {
+  if (filter.length && selectedPersonId.value != null) closePerson()
+})
 
 async function onRecorded() {
   await fetchEvents()
@@ -241,7 +250,6 @@ onBeforeUnmount(() => {
         @select-person="onSelectPerson"
         @select-blank="onBlank"
         @edge-dim-change="onEdgeDimChange"
-        @clear-dynasty-filter="dynastyFilter = []"
       />
     </div>
     <div id="view-timeline" :class="{ on: view === 'timeline' }">
@@ -261,20 +269,22 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <button class="lib-btn" title="人物库 / 事件库" @click="libraryOpen = true">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4 5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 1-2-2z" />
-      <path d="M18 3h-5v18h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
-    </svg>
-  </button>
-  <DynastySelect v-model="dynastyFilter" :unlit="activeUnlit" :mode="view" :persons="persons" @update:unlit="onUnlitChange" />
-  <SideRail :model-value="view" @update:model-value="setView" />
-  <Transition name="tl-switch">
-    <div v-if="view === 'timeline'" class="tl-mode-switch">
-      <button :class="{ on: timelineMode === 'events' }" @click="timelineMode = 'events'">事件</button>
-      <button :class="{ on: timelineMode === 'people' }" @click="timelineMode = 'people'">人物</button>
-    </div>
-  </Transition>
+  <div class="topbar">
+    <button class="lib-btn" title="人物库 / 事件库" @click="libraryOpen = true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 1-2-2z" />
+        <path d="M18 3h-5v18h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+      </svg>
+    </button>
+    <DynastySelect v-model="dynastyFilter" :unlit="activeUnlit" :mode="view" :persons="persons" @update:unlit="onUnlitChange" />
+    <SideRail :model-value="view" @update:model-value="setView" />
+    <Transition name="tl-switch">
+      <div v-if="view === 'timeline'" class="tl-mode-switch">
+        <button :class="{ on: timelineMode === 'events' }" @click="timelineMode = 'events'">事件</button>
+        <button :class="{ on: timelineMode === 'people' }" @click="timelineMode = 'people'">人物</button>
+      </div>
+    </Transition>
+  </div>
   <SearchBar
     :persons="persons"
     :events="events"

@@ -1,5 +1,5 @@
 import type { CustomDynasty } from '~/types/chronicle'
-import { DYNASTY_CATALOG, hashColor, setCustomDynastyColors } from '~/utils/dynasty'
+import { DYNASTY_CATALOG, TIMELINE_BANDS, hashColor, setCustomDynastyColors } from '~/utils/dynasty'
 
 export interface CustomDynastyCreatePayload {
   name: string
@@ -42,9 +42,11 @@ export function useDynasties() {
     await fetchAll()
   }
 
-  // 确保一组朝代/国家名已注册为自定义朝代:不在内置目录、也不在现有自定义表里的会自动补录。
+  // 确保一组朝代/国家名已注册为自定义朝代:不在内置名单、也不在现有自定义表里的会自动补录。
   // 用于新增/编辑人物时,把输入的自定义朝代同步进左上角筛选选框。
-  const builtin = new Set(DYNASTY_CATALOG.map((d) => d.name))
+  // 内置 = 目录细分(DYNASTY_CATALOG)+ 宏观时间色带(TIMELINE_BANDS),
+  // 「汉/晋」等只作为色带存在、未入目录的朝代名,不应再被当成自定义朝代补录。
+  const builtin = new Set([...DYNASTY_CATALOG.map((d) => d.name), ...TIMELINE_BANDS.map((b) => b.name)])
   async function ensure(names: string[]): Promise<void> {
     const existing = new Set(dynasties.value.map((d) => d.name))
     const pending = [...new Set(names.filter((n) => n && n.trim() && !builtin.has(n.trim()) && !existing.has(n.trim())))]

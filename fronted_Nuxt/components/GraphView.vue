@@ -15,7 +15,6 @@ const emit = defineEmits<{
   (e: 'select-person', id: number): void
   (e: 'select-blank'): void
   (e: 'edge-dim-change', ids: number[]): void
-  (e: 'clear-dynasty-filter'): void
 }>()
 
 const wrapEl = ref<HTMLElement | null>(null)
@@ -50,16 +49,21 @@ let edgeRecords: EdgeRecord[] = []
 // 边几何常量:节点圆圈"视觉半径" = Sprite scale 的一半。节点 Sprite scale = R*2,故视觉半径 = R。
 // 端点要停在圆圈"外沿",用视觉半径 R + 一段固定世界间隙(见 animate 内 EDGE_GAP_WORLD)。
 const NODE_R = 11
-// 线与箭头按"屏幕像素"定宽(不随相机远近变粗变细);每帧按边中点距离换算成世界宽度
-const LINE_PX = 2          // 线宽(像素,整体变细)
-const ARROW_LEN_PX = 9     // 箭头长度(像素)
-const ARROW_HALF_PX = 4    // 箭头底半宽(像素)
+// 线与箭头按"世界单位"定宽:随镜头远近一起缩放(与节点一致),远看更细、近看更粗,避免缩远时线条挤成一团。
+const LINE_W = 1.8         // 线宽(世界单位,无向边/无线箭头的线用)
+const DIR_LINE_W = 1.2     // 有向边的尾端线宽(世界单位,比 LINE_W 更细)
+const ARROW_LEN_W = 9      // 箭头长度(世界单位)
+const ARROW_HALF_W = 2     // 箭头底半宽(世界单位)
 const Z_AXIS = new THREE.Vector3(0, 0, 1)   // 拾取盒默认朝向基准(沿边方向)
 const EDGE_PICK_PX = 12    // 拾取盒横截面边长(像素,便于点击细线)
 
 // 视角状态(四元数自由轨道旋转 / 滚轮缩放,静止时缓慢自动环绕,松手带惯性)
-const DEFAULT_R = 340
+const DEFAULT_R = 900
 const FOCUS_R = 200   // 聚焦距离:点人头像后相机推进到距其这么近(透视放大,而非放大头像本身)
+// 景深雾:雾区间随相机距离(camR)平移 —— 中心起雾(前景/中心保持清晰),往后 FOG_DEPTH 单位完全没入背景。
+// 星云半径经 TARGET_R=760 归一化,故后缘约 760/900≈84% 淡出,前后形成"近亮远淡"层次,缩放/聚焦时层次不漂移。
+const FOG_NEAR_OFF = 0    // 雾起点相对 orbit 中心的偏移(0 = 从中心开始起雾)
+const FOG_DEPTH = 900     // 中心往后多少单位完全淡入背景
 const Y_AXIS = new THREE.Vector3(0, 1, 0)
 const IDENT_Q = new THREE.Quaternion()
 let orbitQ = new THREE.Quaternion()   // 累计轨道旋转(无角度钳制、无万向锁)
@@ -315,6 +319,189 @@ function makeEdgeLabel(text: string): THREE.Sprite {
   return sp
 }
 
+// ===== 星云布局:确定性力导向坍陷 =====
+// 把"朝代分扇区的规整圆环"换成"一团团星云":每个朝代一个松散星云团,团内中心密、边缘稀,
+// 团间被关系边拉近、拉变形,整体是无中心、有疏密的盘状星云。所有随机都由散列播种,同一数据每次结果一致。
+
+// 稳定字符串散列 -> uint32(与 utils/dynasty.hashColor 同源,单独实现避免额外导入)
+function hash32(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return h >>> 0
+}
+
+// 由 uint32 种子得到确定性伪随机序列(线性同余,快速可复现)
+function makeRng(seed: number): () => number {
+  let s = seed >>> 0
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 4294967296
+  }
+}
+
+// Box-Muller 生成标准正态随机数(团内高斯撒点用)
+function gaussian3(rng: () => number): [number, number, number] {
+  const box = (): number => {
+    const u = Math.max(rng(), 1e-9)
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng())
+  }
+  return [box(), box(), box()]
+}
+
+// 力导向求解:关系弹簧 + 节点斥力 + 朝代锚点归心 + y 压扁,收敛后归中并归一化到目标半径。
+// 返回的 key = 人物 id,value = 三维坐标(后续 homePos/basePos 结构不变,聚焦/框选/退焦全照旧)。
+function computeNebulaLayout(
+  nodes: Person[],
+  edges: GraphEdge[],
+  groups: Map<string, Person[]>,
+  dynNames: string[],
+): Record<number, THREE.Vector3> {
+  // —— 可调参数(只改这里即可调整星云形态)——
+  const ANCHOR_R = Math.max(190, Math.sqrt(dynNames.length) * 44)   // 朝代锚点撒点球半径:随朝代数开方增长,保持"每团平均占地"恒定
+  const SPRING_K = 0.02       // 关系弹簧劲度(越小越散)
+  const SPRING_REST = 50      // 跨朝代关系弹簧自然长度(节点视觉半径 11)
+  const SPRING_REST_SAME = 30 // 同朝代关系弹簧自然长度(更短,让同朝代人更靠拢)
+  const REPEL_K = 4200        // 斥力强度(越大节点间距越大)
+  const REPEL_R = 150         // 斥力截断半径 = 目标节点间距(也是空间网格单元尺寸)
+  const ANCHOR_K = 0.016      // 朝代锚点归心劲度(越小团越松、越"化开"成自然形状)
+  const FLATTEN_K = 0.002     // y 归零强度(越小越有厚度;0=纯球,大=薄盘)
+  const DAMP = 0.86           // 每步速度阻尼(冷却)
+  const MAX_V = 13            // 每步最大位移,防止初始密集时斥力爆炸
+  const STEPS = 300           // 迭代轮数(足够收敛)
+  const TARGET_R = 760        // 收敛后 95 分位半径归一化目标:越大整片星云越大越散(受相机/雾约束)
+
+  const n = nodes.length
+  if (n === 0) return {}
+
+  // 1) 朝代锚点:确定性伪随机撒进一个球(均匀泊松)→ 自然聚散与空隙,而非规整圆盘
+  const dynAnchor = new Map<string, [number, number, number]>()
+  const arng = makeRng(hash32('chronicle-anchor'))
+  dynNames.forEach((name) => {
+    const r = Math.cbrt(arng()) * ANCHOR_R        // 球内均匀:半径取 cbrt(u)
+    const th = arng() * 2 * Math.PI
+    const ph = Math.acos(2 * arng() - 1)          // 球面均匀
+    dynAnchor.set(name, [r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph)])
+  })
+
+  // 2) 初值:每人在其朝代锚点附近高斯撒点;团半径随人数开方(大团更散),小团有底限,避免挤成一点
+  const pos: Array<[number, number, number]> = new Array(n)
+  const vel: Array<[number, number, number]> = new Array(n)
+  const anchor: Array<[number, number, number]> = new Array(n)
+  const F: Array<[number, number, number]> = new Array(n)
+  nodes.forEach((p, i) => {
+    const key = (p.dynasty || '未知').trim() || '未知'
+    const a = dynAnchor.get(key)!
+    anchor[i] = a
+    const cr = 18 + Math.sqrt(groups.get(key)!.length) * 7   // 每人固定"占地面积"→团半径随人数开方自然生长,无需按具体人数设上限
+    const prng = makeRng(hash32(p.name + '#' + p.id))
+    const g = gaussian3(prng)
+    pos[i] = [a[0] + g[0] * cr, a[1] + g[1] * cr, a[2] + g[2] * cr]
+    vel[i] = [0, 0, 0]
+    F[i] = [0, 0, 0]
+  })
+
+  // 3) 关系弹簧:预处理邻接表,避免每轮查表
+  const idToIdx = new Map<number, number>()
+  nodes.forEach((p, i) => idToIdx.set(p.id, i))
+  const adj: number[][] = new Array(n)
+  for (let i = 0; i < n; i++) adj[i] = []
+  edges.forEach((e) => {
+    const a = idToIdx.get(e.from)
+    const b = idToIdx.get(e.to)
+    if (a != null && b != null && a !== b) { adj[a].push(b); adj[b].push(a) }
+  })
+  // 同朝代判定键:与团簇分组一致(仅主朝代),用于同朝代的边用更短弹簧
+  const dynKey = nodes.map((p) => (p.dynasty || '未知').trim() || '未知')
+
+  // 4) 迭代:斥力(网格加速)+ 关系弹簧 + 朝代归心 + y 压扁
+  const cellInv = 1 / REPEL_R
+  const repR2 = REPEL_R * REPEL_R
+  const grid = new Map<number, number[]>()
+  for (let step = 0; step < STEPS; step++) {
+    // 4a) 建空间网格桶(斥力只查邻近 27 桶,O(n·邻域) 替代 O(n²));键用数值打包,比字符串拼接快数倍
+    grid.clear()
+    for (let i = 0; i < n; i++) {
+      const p = pos[i]
+      const cx = Math.floor(p[0] * cellInv), cy = Math.floor(p[1] * cellInv), cz = Math.floor(p[2] * cellInv)
+      const key = (cx * 65536 + cy) * 65536 + cz
+      let b = grid.get(key)
+      if (!b) { b = []; grid.set(key, b) }
+      b.push(i)
+    }
+    // 4b) 累加各力
+    for (let i = 0; i < n; i++) {
+      const p = pos[i]
+      let fx = 0, fy = 0, fz = 0
+      // 斥力
+      const cx = Math.floor(p[0] * cellInv), cy = Math.floor(p[1] * cellInv), cz = Math.floor(p[2] * cellInv)
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const b = grid.get(((cx + dx) * 65536 + (cy + dy)) * 65536 + (cz + dz))
+        if (!b) continue
+        for (let k = 0; k < b.length; k++) {
+          const j = b[k]
+          if (j === i) continue
+          const q = pos[j]
+          let rx = p[0] - q[0], ry = p[1] - q[1], rz = p[2] - q[2]
+          let d2 = rx * rx + ry * ry + rz * rz
+          if (d2 > repR2) continue
+          if (d2 < 1e-6) { // 几乎不会发生:确定性拆开重叠点
+            const a2 = i * 0.6180339887
+            rx = Math.sin(a2); ry = Math.cos(a2); rz = Math.sin(a2 * 1.7); d2 = 1
+          }
+          const f = REPEL_K / d2
+          const d = Math.sqrt(d2)
+          fx += (rx / d) * f; fy += (ry / d) * f; fz += (rz / d) * f
+        }
+      }
+      // 关系弹簧(沿边方向:超出自然长度拉近、不足推远);同朝代的边自然长度更短,让同朝代人更靠拢
+      for (let k = 0; k < adj[i].length; k++) {
+        const j = adj[i][k]
+        const q = pos[j]
+        const rx = q[0] - p[0], ry = q[1] - p[1], rz = q[2] - p[2]
+        const d = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1e-6
+        const rest = dynKey[i] === dynKey[j] ? SPRING_REST_SAME : SPRING_REST
+        const f = SPRING_K * (d - rest)
+        fx += (rx / d) * f; fy += (ry / d) * f; fz += (rz / d) * f
+      }
+      // 朝代锚点归心(弱)
+      fx += (anchor[i][0] - p[0]) * ANCHOR_K
+      fy += (anchor[i][1] - p[1]) * ANCHOR_K
+      fz += (anchor[i][2] - p[2]) * ANCHOR_K
+      // y 压扁成盘
+      fy -= p[1] * FLATTEN_K
+      F[i][0] = fx; F[i][1] = fy; F[i][2] = fz
+    }
+    // 4c) 积分:阻尼 + 限速
+    for (let i = 0; i < n; i++) {
+      let vx = (vel[i][0] + F[i][0]) * DAMP
+      let vy = (vel[i][1] + F[i][1]) * DAMP
+      let vz = (vel[i][2] + F[i][2]) * DAMP
+      const sp = Math.sqrt(vx * vx + vy * vy + vz * vz)
+      if (sp > MAX_V) { const s = MAX_V / sp; vx *= s; vy *= s; vz *= s }
+      vel[i][0] = vx; vel[i][1] = vy; vel[i][2] = vz
+      pos[i][0] += vx; pos[i][1] += vy; pos[i][2] += vz
+    }
+  }
+
+  // 5) 归中:质心移到原点
+  let cx = 0, cy = 0, cz = 0
+  for (let i = 0; i < n; i++) { cx += pos[i][0]; cy += pos[i][1]; cz += pos[i][2] }
+  cx /= n; cy /= n; cz /= n
+  for (let i = 0; i < n; i++) { pos[i][0] -= cx; pos[i][1] -= cy; pos[i][2] -= cz }
+
+  // 6) 归一化:以 95 分位半径对齐 TARGET_R(避免个别飞出点把整体压小)
+  const dists = new Array(n)
+  for (let i = 0; i < n; i++) dists[i] = Math.hypot(pos[i][0], pos[i][1], pos[i][2])
+  dists.sort((a, b) => a - b)
+  const p95 = dists[Math.min(n - 1, Math.floor(n * 0.95))]
+  const scale = p95 > 1e-6 ? TARGET_R / p95 : 1
+  const out: Record<number, THREE.Vector3> = {}
+  nodes.forEach((p, i) => {
+    out[p.id] = new THREE.Vector3(pos[i][0] * scale, pos[i][1] * scale, pos[i][2] * scale)
+  })
+  return out
+}
+
 function buildGraph() {
   const wrap = wrapEl.value
   if (!wrap || built) return
@@ -328,7 +515,7 @@ function buildGraph() {
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(T.bg)
-  scene.fog = new THREE.Fog(T.bg, 420, 900)
+  scene.fog = new THREE.Fog(T.bg, 1300, 2200)
   camera = new THREE.PerspectiveCamera(60, W / H, 1, 2000)
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   renderer.setSize(W, H)
@@ -369,7 +556,9 @@ function buildGraph() {
     console.warn('环境贴图生成失败,玻璃将退化为纯光照', err)
   }
 
-  // 布局:按朝代(国家)聚类 —— 同朝代人物聚成更紧密的小群,不同朝代分占圆周不同扇区
+  // —— 布局:星云团簇(确定性力导向坍陷)——
+  // 每个朝代一个"星云团":朝代锚点 + 关系弹簧 + 节点斥力 + 弱朝代归心 + y 压扁,
+  // 固定轮数迭代收敛 → "中心密、边缘稀、团间被关系拉近拉变形"的自然盘状星云。
   const groups = new Map<string, Person[]>()
   nodes.forEach((p) => {
     const key = (p.dynasty || '未知').trim() || '未知'
@@ -377,22 +566,7 @@ function buildGraph() {
     groups.get(key)!.push(p)
   })
   const dynNames = [...groups.keys()]
-  const sectorCount = Math.max(1, dynNames.length)
-  const pos: Record<number, THREE.Vector3> = {}
-  const baseR = 150
-  let di = 0
-  groups.forEach((members) => {
-    const baseAngle = (di / sectorCount) * Math.PI * 2 + 0.35
-    const spread = Math.min(0.42, (Math.PI * 2 / sectorCount) * 0.32)
-    members.forEach((p, mi) => {
-      const off = members.length <= 1 ? 0 : (mi / (members.length - 1) - 0.5) * 2 * spread
-      const a = baseAngle + off
-      const r = baseR + (mi % 3) * 30
-      const y = ((di * 53 + mi * 31) % 110) - 55
-      pos[p.id] = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r)
-    })
-    di++
-  })
+  const pos: Record<number, THREE.Vector3> = computeNebulaLayout(nodes, edges, groups, dynNames)
   byId = new Map(nodes.map((p) => [p.id, p]))
 
   // 关系边:直线 + 一体化箭头(单一 billboard 几何,线端/箭头尖搭在圆圈边缘)
@@ -460,14 +634,14 @@ function buildGraph() {
     halo.scale.set(haloBase, haloBase, 1)
     grp.add(halo)
 
-    // 内部二维圆头像:不透明实心圆牌,写深度 → 真实地挡住从它身后穿过的线(第 1 条:不让线透到头像上面)。
-    // alphaTest 丢弃圆外像素,避免 Sprite 方形平面四角误写深度切出方框。
+    // 内部二维圆头像:透明圆牌(默认不透明度 1 = 实心),写深度 → 真实地挡住从它身后穿过的线(不让线透到头像上面)。
+    // alphaTest 阈值降到很小:只丢弃四角全透明像素,圆内像素即使 opacity 很低也不会被误杀,头像才能按 opacity 淡出。
     const face = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeNodeTexture(p),
-      transparent: false,          // 不透明:身后线条被这块实心圆牌挡住,不再交叠穿透
+      transparent: true,           // 透明:聚焦时背景头像按 opacity 淡出变透明
       depthTest: true,
-      depthWrite: true,            // 写深度,成为"空间里的实心遮挡板"
-      alphaTest: 0.5,              // 圆外透明像素丢弃,不写深度
+      depthWrite: true,            // 实心时写深度挡住身后连线;背景头像退后时由 applyHighlight 关掉 depthWrite 让线透出
+      alphaTest: 0.01,             // 只丢弃四角(alpha≈0)像素,圆内(alpha≈1)即使淡出也不被误杀
     }))
     face.scale.set(R * 1.4, R * 1.4, 1)
     grp.add(face)
@@ -621,10 +795,15 @@ function onClick(e: MouseEvent) {
     return
   }
 
-  resetView()
+  // 空白回退一步:退出人物/事件聚焦时,若背景仍有朝代筛选则框住该朝代(回到朝代高亮);否则回自由视角。
+  const hasFocus = currentHighlightId != null || highlightNodeIds.value.size > 0
+  const dynIds = props.dynastyFilter.length
+    ? nodes.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty))).map((p) => p.id)
+    : []
   dimmedEdges.value = new Set()
-  emit('clear-dynasty-filter')
   highlightNodeIds.value = new Set()
+  if (hasFocus && dynIds.length) framePersons(dynIds)
+  else resetView()
   applyHighlight()
   emit('select-blank')
 }
@@ -632,7 +811,7 @@ function onClick(e: MouseEvent) {
 function onWheel(e: WheelEvent) {
   e.preventDefault()
   lastInteract = performance.now()
-  targetCamR = Math.max(150, Math.min(620, targetCamR + e.deltaY * 0.4))
+  targetCamR = Math.max(120, Math.min(1200, targetCamR + e.deltaY * 0.4))
   // 缩放也是手动调整:记录缩放后的自由距离,回位时保留缩放
   if (focusedId == null) freeCamR = targetCamR
 }
@@ -782,7 +961,7 @@ function saveCamera() {
 function playEntryDolly(targetQ: THREE.Quaternion, targetFocus: THREE.Vector3, targetR: number, dur = 1300) {
   const revealQ = targetQ.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(Y_AXIS, 0.38))
   orbitQ.copy(revealQ)
-  camR = Math.min(targetR * 1.4, 620) // 封顶避免 reveal 距离超出用户可缩放上限,落入过浓雾区
+  camR = Math.min(targetR * 1.4, 1200) // 封顶避免 reveal 距离超出用户可缩放上限,落入过浓雾区
   curFocus.copy(targetFocus)
   focusTarget.copy(targetFocus)
   targetCamR = camR
@@ -821,9 +1000,9 @@ function nodeLinked(p: Person): boolean {
       const connects = (r.from === currentHighlightId && r.to === p.id) || (r.to === currentHighlightId && r.from === p.id)
       return connects && !dimmedEdges.value.has(r.id)
     })) return true
+    return false // 人物聚焦与朝代筛选互斥:聚焦态下不再落入朝代筛选
   }
-  if (props.dynastyFilter.includes(dynastyColor(p.dynasty))) return true
-  return false
+  return props.dynastyFilter.includes(dynastyColor(p.dynasty))
 }
 
 // 光晕开关:只给"高亮者"点光晕 —— 事件组/朝代组全员点亮;人物聚焦时只点聚焦者本人(邻居虽亮但无光晕,分层级)。
@@ -842,7 +1021,9 @@ function edgeLevel(r: { id: number; from: number; to: number }): number {
     return highlightNodeIds.value.has(r.from) && highlightNodeIds.value.has(r.to) ? 1 : 0
   }
   if (!currentHighlightId && !props.dynastyFilter.length) return 1
-  if (currentHighlightId && (r.from === currentHighlightId || r.to === currentHighlightId)) return 2
+  if (currentHighlightId) {
+    return r.from === currentHighlightId || r.to === currentHighlightId ? 2 : 0
+  }
   if (props.dynastyFilter.length) {
     const fp = byId.get(r.from)
     const tp = byId.get(r.to)
@@ -871,9 +1052,9 @@ function applyHighlight() {
     rec.label.visible = vis
     rec.pick.visible = vis
     const lv = edgeLevel({ id: rec.id, from: rec.from, to: rec.to })
-    rec.mat.opacity = lv === 0 ? 0.05 : (lv === 2 ? 0.9 : op)
+    rec.mat.opacity = lv === 0 ? 0.02 : (lv === 2 ? 0.9 : op)
     // 边上的关系名标签跟随线一起变暗,避免压暗的线还挂着亮白的字
-    ;(rec.label as THREE.Sprite).material.opacity = lv === 0 ? 0.06 : 1
+    ;(rec.label as THREE.Sprite).material.opacity = lv === 0 ? 0.02 : 1
   })
   nodes.forEach((p) => {
     const g = nodeGroupMap[p.id]
@@ -882,11 +1063,34 @@ function applyHighlight() {
     g.userData.linked = linked
     // 点亮/熄灭:熄灭朝代的全部标签人物隐藏(节点组 visible=false,连同光环/标签/拾取一起消失)
     g.visible = personVisible(p)
-    // 非高亮节点退后:头像是不透明实心圆牌,不能用 opacity 压暗;改用"颜色降亮度"让其退后(材质 color 乘系数)
+    // 背景(非聚焦)头像退后:face 是透明圆牌,按 opacity 淡出(压暗 + 变透明),并关掉 depthWrite 让身后的连线能透出;
+    // 聚焦者保持不透明实心(写深度,继续挡住身后连线)。
     const faceMat = (g.userData.face as THREE.Sprite).material as THREE.SpriteMaterial
-    faceMat.color.setScalar(linked ? 1 : 0.25)
-    ;(g.userData.label as THREE.Sprite).material.opacity = linked ? 1 : 0.12
+    faceMat.color.setScalar(linked ? 1 : 0.5)
+    faceMat.opacity = linked ? 1 : 0.12
+    faceMat.depthWrite = linked
+    ;(g.userData.label as THREE.Sprite).material.opacity = linked ? 1 : 0.07
   })
+}
+
+// 把自由视角的旋转中心平滑移到"当前可见人物"的质心:点亮/熄灭或筛选后,镜头绕可见云团转,
+// 而非绕整个关系网的原点转(例如只点亮一个朝代时,以该朝代的云团为旋转中心)。
+function recenterOnVisible() {
+  if (!built) return
+  if (focusedId != null) return   // 聚焦某人物时不抢中心(聚焦有自己的机位)
+  const c = new THREE.Vector3()
+  let n = 0
+  nodes.forEach((p) => {
+    const g = nodeGroupMap[p.id]
+    if (!g) return
+    if (!personVisible(p)) return
+    if (props.dynastyFilter.length && !props.dynastyFilter.includes(dynastyColor(p.dynasty))) return
+    c.add(g.userData.homePos as THREE.Vector3)
+    n++
+  })
+  if (!n) return
+  c.multiplyScalar(1 / n)
+  focusTarget.copy(c)
 }
 
 // 点亮一组人物(事件相关人物):只突出这些节点与其间连线,并让镜头框住所有人
@@ -899,9 +1103,10 @@ function highlightPersons(ids: number[]) {
 // 镜头框选:把相机对准这些节点的中心,拉远到刚好能装下它们的最大距离(靠推进/拉远透视放大,而非撑大头像)
 function framePersons(ids: number[]) {
   if (!built || !ids.length) return
-  // 事件框选是"全局视角":退出之前聚焦的人,并让整张网回到原始布局(参与者位于 homePos)
+  // 事件框选是"全局视角":退出之前聚焦的人,并让整张网回到原始布局(参与者位于 homePos)。
+  // 无条件重排复位:聚焦重排可能早已结束(relayoutActive=false 但 basePos 已停留在重排位),仍需飞回 homePos。
   focusedId = null
-  if (relayoutActive) startRelayout(null)
+  startRelayout(null)
 
   // 以原始布局位置(homePos)算包围球:退焦重排复位后参与者正好落进框内
   const center = new THREE.Vector3()
@@ -992,6 +1197,10 @@ function animate() {
   camera.up.set(0, 1, 0).applyQuaternion(orbitQ)
   camera.lookAt(c)
 
+  // 景深雾随相机距离平移:中心(camR 处)起雾、前景保持清晰,后景淡入背景色,缩放/聚焦时前后层次始终一致
+  scene.fog.near = camR + FOG_NEAR_OFF
+  scene.fog.far = camR + FOG_NEAR_OFF + FOG_DEPTH
+
   // 先更新人物节点的真实位置。优先驱动"聚焦重排"(整张网按关系距离分层);否则用旧的"拎起/原位"逻辑。
   if (relayoutActive) {
     relayoutT += dt / RELAY_DUR
@@ -1067,12 +1276,14 @@ function animate() {
     rec.pick.position.copy(mid)
     rec.pick.quaternion.setFromUnitVectors(Z_AXIS, dir)
 
-    // 像素定宽:按边中点与相机的距离,把固定像素宽度换算成世界宽度(远近恒定,不随距离突变)
+    // 世界定宽:线/箭头直接按世界单位,随镜头远近一起缩放(远看变细,避免缩远时挤成一团);
+    // 拾取盒仍按屏幕像素定宽,保持细线在缩远时也容易点到。
     const midDist = camPos.distanceTo(mid)
     const pxPerWorld = (2 * midDist * Math.tan((camera.fov * Math.PI) / 360)) / viewH
-    const lineHalf = (LINE_PX / 2) * pxPerWorld
-    const arrowHalf = ARROW_HALF_PX * pxPerWorld
-    const arrowLen = ARROW_LEN_PX * pxPerWorld
+    const lineHalf = LINE_W / 2
+    const dirLineHalf = DIR_LINE_W / 2
+    const arrowHalf = ARROW_HALF_W
+    const arrowLen = ARROW_LEN_W
     rec.pick.scale.set(EDGE_PICK_PX * pxPerWorld, EDGE_PICK_PX * pxPerWorld, a.distanceTo(b))
 
     // 顶点相对中点(排序原点移到中点;聚焦人物被真实"拎起"后即压过自己的连线)
@@ -1082,8 +1293,8 @@ function animate() {
     const tp = new THREE.Vector3().subVectors(tip, mid)
     if (rec.directed) {
       const bs = new THREE.Vector3().copy(tip).addScaledVector(segDir, -arrowLen).sub(mid)
-      attr.setXYZ(0, s.x + side.x * lineHalf, s.y + side.y * lineHalf, s.z + side.z * lineHalf)
-      attr.setXYZ(1, s.x - side.x * lineHalf, s.y - side.y * lineHalf, s.z - side.z * lineHalf)
+      attr.setXYZ(0, s.x + side.x * dirLineHalf, s.y + side.y * dirLineHalf, s.z + side.z * dirLineHalf)
+      attr.setXYZ(1, s.x - side.x * dirLineHalf, s.y - side.y * dirLineHalf, s.z - side.z * dirLineHalf)
       attr.setXYZ(2, bs.x + side.x * arrowHalf, bs.y + side.y * arrowHalf, bs.z + side.z * arrowHalf)
       attr.setXYZ(3, bs.x - side.x * arrowHalf, bs.y - side.y * arrowHalf, bs.z - side.z * arrowHalf)
       attr.setXYZ(4, tp.x, tp.y, tp.z)
@@ -1243,10 +1454,12 @@ watch(
   (filter) => {
     highlightNodeIds.value = new Set() // 切到朝代筛选:退出事件人物点亮
     applyHighlight()
-    // 选择朝代后,把镜头框住这些朝代的全体人物(与搜索选事件的框选一致);清除筛选时不框选
+    // 选择朝代后,把镜头框住这些朝代的全体人物(与搜索选事件的框选一致);清除筛选时回到可见质心
     if (filter.length) {
       const ids = nodes.filter((p) => filter.includes(dynastyColor(p.dynasty))).map((p) => p.id)
       framePersons(ids)
+    } else {
+      recenterOnVisible()
     }
   },
 )
@@ -1254,7 +1467,11 @@ watch(
 // 朝代"点亮/熄灭"变化:重新计算人物/连线显隐(无需重建,仅切换 visible)
 watch(
   () => props.unlitDynasties,
-  () => applyHighlight(),
+  () => {
+    applyHighlight()
+    // 点亮/熄灭改变了可见集:旋转中心跟随可见人物质心(只显示一个朝代时绕该朝代云团转)
+    recenterOnVisible()
+  },
 )
 watch(dimmedEdges, (s) => {
   applyHighlight()

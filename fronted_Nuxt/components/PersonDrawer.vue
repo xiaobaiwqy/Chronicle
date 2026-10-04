@@ -506,7 +506,7 @@ function roleOf(eventId: number): string {
 
 // —— 点击抽屉外部自动收起(仅时间线视图下启用):与下方事件卡片一致 ——
 // 拖动时间轴 / 滚轮缩放不触发:拖动累计位移 > 6px 判为拖拽直接跳过;滚轮不产生 mousedown。
-// 排除抽屉本体与各类浮层(事件卡片 / 搜索框 / 下拉菜单 / 头像库 / 取色面板 / 添加面板),
+// 排除抽屉本体与各类浮层(事件卡片 / 搜索框 / 下拉菜单 / 头像库 / 取色面板 / 添加面板)及时间线人物卡片,
 // 避免在这些浮层里点击(如切换人物、选朝代)时把抽屉收起又立即重新打开造成闪烁。
 const rootEl = ref<HTMLElement | null>(null)
 let downX = 0
@@ -528,7 +528,7 @@ function onDocUp(e: MouseEvent) {
   if (downMoved > 6) return // 拖拽 / 滑动,不收起
   const t = e.target as HTMLElement | null
   if (!t || rootEl.value?.contains(t)) return // 点击抽屉内部
-  if (t.closest('.evpop, .searchbar, .asel-menu, .avlib, .cp-pop, .addpanel')) return // 浮层内部
+  if (t.closest('.evpop, .searchbar, .asel-menu, .avlib, .cp-pop, .addpanel, .tl-person')) return // 浮层/时间线人物卡片内部
   emit('close')
 }
 
