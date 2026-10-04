@@ -782,37 +782,29 @@ function scrollStep(dir: number) {
   const step = Math.max(90, viewW.value * 0.6)
   smoothScrollTo((wrapEl.value?.scrollLeft ?? 0) + dir * step)
 }
-function applyScrollRatio(t: number) {
-  const wrap = wrapEl.value
-  if (!wrap) return
-  stopScrollAnim() // 齿轮拖拽直接接管位置,停掉按钮动画
-  wrap.scrollLeft = Math.min(scrollMax.value, Math.max(0, t * scrollMax.value))
-}
 const scrollTrackEl = ref<HTMLElement | null>(null)
 let lastGearX = 0
-// 指针横坐标 → 0..1(整条滚轮满宽,直接线性映射)
-function gearRatioAt(e: PointerEvent): number {
-  const el = scrollTrackEl.value
-  if (!el) return 0
-  const rect = el.getBoundingClientRect()
-  if (rect.width <= 0) return 0
-  return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-}
+let gearStartScroll = 0
 function onGearDown(e: PointerEvent) {
   if (scrollMax.value <= 0) return
   e.preventDefault()
   gearDragging = true
   lastGearX = e.clientX
+  gearStartScroll = wrapEl.value!.scrollLeft
   stopZoom()
+  stopScrollAnim()
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  applyScrollRatio(gearRatioAt(e))
 }
 function onGearMove(e: PointerEvent) {
   if (!gearDragging) return
   const dx = e.clientX - lastGearX
   lastGearX = e.clientX
   gearPos.value += dx // 抓取:齿纹直接跟手(1:1),与滑动方向相反
-  applyScrollRatio(gearRatioAt(e))
+  // 页面与手指同向:向右拖 → 内容向右移(scrollLeft 减小),与直接拖拽内容一致。
+  // 整条滑条代表全宽:按「滑条宽 : 全滚动宽」的比例映射,向右拖满一条滑条即滚到最右。
+  const trackW = scrollTrackEl.value?.clientWidth || 1
+  const k = scrollMax.value / Math.max(1, trackW)
+  wrapEl.value!.scrollLeft = Math.min(scrollMax.value, Math.max(0, gearStartScroll - dx * k))
 }
 function onGearUp(e: PointerEvent) {
   if (!gearDragging) return
