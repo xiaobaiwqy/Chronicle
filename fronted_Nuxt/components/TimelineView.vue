@@ -865,28 +865,30 @@ function scrollStep(dir: number) {
   smoothScrollTo((wrapEl.value?.scrollLeft ?? 0) + dir * step)
 }
 const scrollTrackEl = ref<HTMLElement | null>(null)
-let lastGearX = 0
+let gearStartX = 0
 let gearStartScroll = 0
+let gearStartPos = 0
 function onGearDown(e: PointerEvent) {
   if (scrollMax.value <= 0) return
   e.preventDefault()
   gearDragging = true
-  lastGearX = e.clientX
+  gearStartX = e.clientX
   gearStartScroll = wrapEl.value!.scrollLeft
+  gearStartPos = gearPos.value
   stopZoom()
   stopScrollAnim()
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
 }
 function onGearMove(e: PointerEvent) {
   if (!gearDragging) return
-  const dx = e.clientX - lastGearX
-  lastGearX = e.clientX
-  gearPos.value += dx // 抓取:齿纹直接跟手(1:1),与滑动方向相反
+  // 用「按下点到当前点」的累计位移(而非单次增量),否则每帧只滚回起点附近、页面卡在原地。
+  const totalDx = e.clientX - gearStartX
+  gearPos.value = gearStartPos + totalDx // 抓取:齿纹直接跟手(1:1)
   // 页面与手指同向:向右拖 → 内容向右移(scrollLeft 减小),与直接拖拽内容一致。
   // 整条滑条代表全宽:按「滑条宽 : 全滚动宽」的比例映射,向右拖满一条滑条即滚到最右。
   const trackW = scrollTrackEl.value?.clientWidth || 1
   const k = scrollMax.value / Math.max(1, trackW)
-  wrapEl.value!.scrollLeft = Math.min(scrollMax.value, Math.max(0, gearStartScroll - dx * k))
+  wrapEl.value!.scrollLeft = Math.min(scrollMax.value, Math.max(0, gearStartScroll - totalDx * k))
 }
 function onGearUp(e: PointerEvent) {
   if (!gearDragging) return
