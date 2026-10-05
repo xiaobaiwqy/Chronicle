@@ -805,6 +805,7 @@ function onClick(e: MouseEvent) {
     highlightNodeIds.value = new Set()
     dimmedEdges.value = new Set()
     applyHighlight()
+    recenterOnVisible() // 清掉事件组后,旋转中心回到剩余状态(朝代筛选/全网可见质心)
   }
   emit('select-blank')
 }
@@ -1540,9 +1541,20 @@ watch(
       prevNow = performance.now()
       lastInteract = performance.now()
       if (built && !rafId) rafId = requestAnimationFrame(animate)
-      // 每次进入都播放运镜:飞回上次定格机位(首次进入时 saved 即初始机位)
       hasEntered = true
-      playEntryDolly(savedOrbitQ, savedFocus, savedCamR, 1200)
+      // 进入时若已处于聚焦/筛选态(如时间线选朝代后切到关系网),以聚焦团为旋转中心并框住它们,
+      // 而不是飞回上次定格的全网机位 —— 否则高亮虽在,旋转仍绕全网中心。
+      const dynIds = props.dynastyFilter.length ? dynastyIds() : []
+      if (dynIds.length) {
+        framePersons(dynIds)
+      } else if (highlightNodeIds.value.size) {
+        framePersons([...highlightNodeIds.value])
+      } else {
+        // 单人物高亮 / 点亮熄灭变化 / 纯自由视角:旋转中心按当前状态重算(高亮者或可见人物质心),
+        // 机位飞回上次定格的视角与缩放,避免沿用离开时已过期的中心。
+        recenterOnVisible()
+        playEntryDolly(savedOrbitQ, focusTarget, savedCamR, 1200)
+      }
     })
   },
 )
