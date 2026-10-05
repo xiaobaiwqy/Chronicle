@@ -1,6 +1,6 @@
 {
   "name": "chronicle-desktop",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "description": "人物志桌面端(Electron 外壳 + PyInstaller 打包的 FastAPI 后端)",
   "main": "main.js",
