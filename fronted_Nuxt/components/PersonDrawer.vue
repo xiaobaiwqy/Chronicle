@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChronicleEvent, PersonDetail, SelectOption } from '~/types/chronicle'
+import type { ChronicleEvent, DetailRelation, PersonDetail, SelectOption } from '~/types/chronicle'
 import { dynastyColor, dynastyOptions, parseYear, yrRange, sanitizeYearEl } from '~/utils/dynasty'
 
 const props = defineProps<{ open: boolean; detail: PersonDetail | null; dimmedRelations?: number[]; dismissOnOutside?: boolean }>()
@@ -14,7 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const { persons, update: updatePerson, remove: removePerson } = usePersons()
-const { createRelation, removeRelation } = useRelations()
+const { createRelation, updateRelation, removeRelation } = useRelations()
 const { create, update: updateEvent, remove: removeEvent } = useEvents()
 const { dynasties, ensure } = useDynasties()
 const { urlFor } = useAvatars()
@@ -46,6 +46,7 @@ watch(
     confirmDel.value = null
     showForm.value = false
     selEvents.value = new Set()
+    editingRelId.value = null
     if (props.open && prevId != null && id != null) {
       shown.value = false
       setTimeout(() => {
@@ -291,6 +292,46 @@ async function delRelation(id: number) {
   }
 }
 
+// —— 关系编辑(在每条关系后加编辑按钮,直接改关系) ——
+const editingRelId = ref<number | null>(null)
+const relEditForm = reactive({ target: 0, label: '', dir: 0 }) // dir 语义同 relForm
+function startEditRelation(r: DetailRelation) {
+  editingRelId.value = r.id
+  relEditForm.target = r.other_id
+  relEditForm.label = r.label
+  // 反向推导方向:无向 → 2;否则以"当前人物为 from"判 dir 0,否则 dir 1
+  relEditForm.dir = !r.directed ? 2 : r.from_person_id === data.value?.person.id ? 0 : 1
+}
+function cancelEditRelation() {
+  editingRelId.value = null
+}
+async function saveRelation() {
+  const p = data.value?.person
+  const id = editingRelId.value
+  if (!p || id == null) return
+  if (!relEditForm.target) {
+    toast.show('请选择关联人物')
+    return
+  }
+  const directed = relEditForm.dir !== 2
+  const fromId = relEditForm.dir === 1 ? relEditForm.target : p.id
+  const toId = relEditForm.dir === 1 ? p.id : relEditForm.target
+  try {
+    await updateRelation(id, {
+      from_person_id: fromId,
+      to_person_id: toId,
+      label: relEditForm.label.trim() || '关联',
+      directed,
+    })
+    toast.show('已更新关系')
+    editingRelId.value = null
+    emit('updated')
+  } catch (err) {
+    console.error('[Chronicle] 更新关系失败', err)
+    toast.show('更新失败,请检查后端服务')
+  }
+}
+
 // —— 删除人物(二次确认后级联删除) ——
 async function doDelete() {
   const p = data.value?.person
@@ -448,20 +489,23 @@ const relItems = computed(() => {
   const d = data.value
   if (!d) return []
   const pid = d.person.id
+  const pName = d.person.name
   return d.relations.map((r) => {
-    const isFrom = r.from_person_id === pid
-    const arrow = r.directed ? (isFrom ? '→' : '←') : '↔'
     const other = persons.value.find((p) => p.id === r.other_id)
     const otherColor = r.other_color || (other ? other.color || dynastyColor(other.dynasty) : '#8e8e93')
+    // 按箭头顺序排:有向关系 from(人物1)→ to(人物2);无向关系当前人物在前
+    const selfFirst = !r.directed || r.from_person_id === pid
+    const name1 = selfFirst ? pName : r.other_name
+    const name2 = selfFirst ? r.other_name : pName
     return {
       id: r.id,
       label: r.label,
+      arrow: r.directed ? '→' : '↔',
+      name1,
+      name2,
       otherId: r.other_id,
       otherName: r.other_name,
       otherColor,
-      arrow,
-      dir: `${arrow} ${r.other_name}`,
-      directed: r.directed,
       lit: !dimmedIds.value.has(r.id),
     }
   })
@@ -665,10 +709,32 @@ onBeforeUnmount(() => {
           <div class="sec-t"><span class="dot"></span>关系</div>
           <div v-if="data.relations.length" class="rel-list">
             <div v-for="r in data.relations" :key="'er' + r.id" class="rel-row">
-              <span class="rel-chip">
-                {{ r.label }} <b>{{ r.directed ? (r.from_person_id === data.person.id ? '→' : '←') : '↔' }} {{ r.other_name }}</b>
-              </span>
-              <button class="mini-del" :class="{ on: confirmDel?.kind === 'rel' && confirmDel.id === r.id }" @click="delRelation(r.id)">{{ confirmDel?.kind === 'rel' && confirmDel.id === r.id ? '确认?' : '✕' }}</button>
+              <div v-if="editingRelId === r.id" class="rel-edit">
+                <div class="ap-dir-row">
+                  <span class="ap-new-chip" title="当前人物">{{ data.person.name[0] }}</span>
+                  <button type="button" class="ap-dir-btn" :class="{ on: relEditForm.dir !== 2 }" @click="relEditForm.dir = cycleDir(relEditForm.dir)">
+                    {{ DIR_ICONS[relEditForm.dir] }}
+                  </button>
+                  <AppSelect v-model="relEditForm.target" :options="personOptions" placeholder="选择人物" searchable search-placeholder="搜索人物…" />
+                </div>
+                <span class="ap-dir-lab">{{ relLabels[relEditForm.dir] }}</span>
+                <div class="ap-field">
+                  <input v-model="relEditForm.label" class="ap-inp" placeholder="如 君臣、同门、父子" />
+                </div>
+                <div class="rel-edit-actions">
+                  <button class="btn sm" @click="saveRelation">保存</button>
+                  <button type="button" class="btn sm ghost" @click="cancelEditRelation">取消</button>
+                </div>
+              </div>
+              <template v-else>
+                <span class="rel-chip">
+                  {{ r.label }} <b>{{ r.directed ? (r.from_person_id === data.person.id ? '→' : '←') : '↔' }} {{ r.other_name }}</b>
+                </span>
+                <button class="mini-edit" title="编辑关系" @click="startEditRelation(r)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                </button>
+                <button class="mini-del" :class="{ on: confirmDel?.kind === 'rel' && confirmDel.id === r.id }" @click="delRelation(r.id)">{{ confirmDel?.kind === 'rel' && confirmDel.id === r.id ? '确认?' : '✕' }}</button>
+              </template>
             </div>
           </div>
           <span v-else class="empty">暂无关系</span>
@@ -680,7 +746,7 @@ onBeforeUnmount(() => {
             <button type="button" class="ap-dir-btn" :class="{ on: relForm.dir !== 2 }" @click="relForm.dir = cycleDir(relForm.dir)">
               {{ DIR_ICONS[relForm.dir] }}
             </button>
-            <AppSelect v-model="relForm.target" :options="personOptions" placeholder="选择人物" />
+            <AppSelect v-model="relForm.target" :options="personOptions" placeholder="选择人物" searchable search-placeholder="搜索人物…" />
           </div>
           <span class="ap-dir-lab">{{ relLabels[relForm.dir] }}</span>
         </div>
@@ -746,8 +812,13 @@ onBeforeUnmount(() => {
           <div class="rels">
             <div v-for="r in relItems" :key="'r' + r.id" class="rel" :class="{ lit: r.lit }" :style="{ '--rc': r.otherColor }" @click="emit('highlight-relation', r.id)">
               <span class="dot" :title="'查看 ' + r.otherName" @click.stop="emit('select-person', r.otherId)">{{ r.otherName[0] }}</span>
-              <span class="nm">{{ r.label }} · {{ r.otherName }}</span>
-              <span class="arrow">{{ r.arrow }}</span>
+              <span class="nm">
+                <b class="pn">{{ r.name1 }}</b>
+                <span class="arr">{{ r.arrow }}</span>
+                <b class="pn">{{ r.name2 }}</b>
+                <span class="arr">·</span>
+                <span class="rl">{{ r.label }}</span>
+              </span>
             </div>
           </div>
         </template>

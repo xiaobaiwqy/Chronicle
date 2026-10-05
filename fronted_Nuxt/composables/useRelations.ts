@@ -24,9 +24,13 @@ export function useRelations() {
     return api<Relation>('/relations', { method: 'POST', body: payload })
   }
 
+  async function updateRelation(id: number, payload: RelationCreatePayload): Promise<Relation> {
+    return api<Relation>(`/relations/${id}`, { method: 'PUT', body: payload })
+  }
+
   async function removeRelation(id: number): Promise<void> {
     await api<void>(`/relations/${id}`, { method: 'DELETE' })
   }
 
-  return { graph, fetchGraph, fetchAll, createRelation, removeRelation }
+  return { graph, fetchGraph, fetchAll, createRelation, updateRelation, removeRelation }
 }

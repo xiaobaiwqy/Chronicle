@@ -24,6 +24,17 @@ def create_relation(data: schemas.RelationCreate, db: Session = Depends(get_db))
     return relation_to_schema(crud.create_relation(db, data))
 
 
+@router.put("/{relation_id}", response_model=schemas.Relation)
+def update_relation(relation_id: int, data: schemas.RelationUpdate, db: Session = Depends(get_db)):
+    r = crud.get_relation(db, relation_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="关系不存在")
+    missing = [pid for pid in (data.from_person_id, data.to_person_id) if person_crud.get_person(db, pid) is None]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"关系人物不存在: {missing}")
+    return relation_to_schema(crud.update_relation(db, r, data))
+
+
 @router.delete("/{relation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_relation(relation_id: int, db: Session = Depends(get_db)):
     r = crud.get_relation(db, relation_id)

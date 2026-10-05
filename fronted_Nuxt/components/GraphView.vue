@@ -82,6 +82,8 @@ const ORIGIN = new THREE.Vector3(0, 0, 0)
 // freeOrbitQ/freeCamR:最近一次"手动自由视角"(初始 = 默认机位;手动拖动松手 / 滚轮缩放时更新)。点空白与取消聚焦都平滑回到这里
 let freeOrbitQ = new THREE.Quaternion().copy(orbitQ)
 let freeCamR = DEFAULT_R
+// 初始(刚进入页面)机位:global 按钮回到这里 —— 显示最大关系网,而非最近一次手动视角。
+const INITIAL_ORBIT_Q = new THREE.Quaternion().copy(orbitQ)
 
 // 视角定格/恢复:离开关系网时保存当前机位,再次进入时从 reveal 机位平滑飞回它;首次进入时 saved 仍等于初始机位,故开场运镜自动飞向初始机位。
 let savedOrbitQ = new THREE.Quaternion().copy(orbitQ)
@@ -795,16 +797,15 @@ function onClick(e: MouseEvent) {
     return
   }
 
-  // 空白回退一步:退出人物/事件聚焦时,若背景仍有朝代筛选则框住该朝代(回到朝代高亮);否则回自由视角。
-  const hasFocus = currentHighlightId != null || highlightNodeIds.value.size > 0
-  const dynIds = props.dynastyFilter.length
-    ? nodes.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty))).map((p) => p.id)
-    : []
-  dimmedEdges.value = new Set()
-  highlightNodeIds.value = new Set()
-  if (hasFocus && dynIds.length) framePersons(dynIds)
-  else resetView()
-  applyHighlight()
+  // 空白点击:仅单人物聚焦态回退(有朝代筛选则回该朝代群体,否则回自由视角);
+  // 群体(朝代筛选)/自由态点击空白不动作,避免误退出。
+  const hadSingleFocus = focusedId != null || currentHighlightId != null
+  if (hadSingleFocus) revertFocus()
+  else {
+    highlightNodeIds.value = new Set()
+    dimmedEdges.value = new Set()
+    applyHighlight()
+  }
   emit('select-blank')
 }
 
@@ -930,6 +931,72 @@ function resetView() {
   focusedId = null
   startFocusAnim(freeOrbitQ, ORIGIN, freeCamR, 900)
   startRelayout(null)
+}
+
+// 一键回到初始界面:退出聚焦/筛选/事件组/熄灭连线,整张网回原始布局并飞到"刚进入页面"的默认机位(显示最大关系网)。
+function resetToGlobal() {
+  if (!built) return
+  focusedId = null
+  currentHighlightId = null
+  highlightNodeIds.value = new Set()
+  dimmedEdges.value = new Set()
+  startRelayout(null)
+  startFocusAnim(INITIAL_ORBIT_Q, ORIGIN, DEFAULT_R, 900)
+  applyHighlight()
+}
+
+// 立即(无动画)回退单人物聚焦:排布直接回原布局、镜头直接回自由视角。用于离开关系网时清除残留聚焦态,
+// 保证 saveCamera 定格的是自由机位(而非聚焦机位),再次进入时不会带着已关闭人物的聚焦回来。
+// 有朝代筛选时回朝代群体中心(而非全网),保持"聚焦团为中心"的旋转控制。
+function commitRevertFocus() {
+  if (!built) return
+  focusedId = null
+  currentHighlightId = null
+  highlightNodeIds.value = new Set()
+  dimmedEdges.value = new Set()
+  relayoutActive = false
+  relayoutT = 0
+  nodes.forEach((p) => {
+    const g = nodeGroupMap[p.id]
+    if (!g) return
+    const home = g.userData.homePos as THREE.Vector3
+    g.position.copy(home)
+    g.userData.basePos = home.clone()
+  })
+  const fc = frameCenter(dynastyIds())
+  orbitQ.copy(freeOrbitQ)
+  velQ.copy(IDENT_Q)
+  focusAnim.active = false
+  idleT = 0
+  if (fc) {
+    curFocus.copy(fc.center)
+    focusTarget.copy(fc.center)
+    camR = fc.dist
+    targetCamR = fc.dist
+  } else {
+    camR = freeCamR
+    targetCamR = freeCamR
+    curFocus.copy(ORIGIN)
+    focusTarget.copy(ORIGIN)
+  }
+  applyHighlight()
+}
+
+// 退焦(单人物聚焦回退):排布与镜头一起回退,与点空白一致;关系网不可见时立即提交(无动画)。
+function revertFocus() {
+  if (!built) return
+  const dynIds = dynastyIds()
+  if (!props.active) {
+    commitRevertFocus()
+    return
+  }
+  focusedId = null
+  currentHighlightId = null
+  highlightNodeIds.value = new Set()
+  dimmedEdges.value = new Set()
+  if (dynIds.length) framePersons(dynIds)
+  else resetView()
+  applyHighlight()
 }
 
 // 启动一次聚焦/退焦过渡:orbitQ 用 slerp,中心与缩放用 lerp,easeInOutCubic
@@ -1073,11 +1140,17 @@ function applyHighlight() {
   })
 }
 
-// 把自由视角的旋转中心平滑移到"当前可见人物"的质心:点亮/熄灭或筛选后,镜头绕可见云团转,
-// 而非绕整个关系网的原点转(例如只点亮一个朝代时,以该朝代的云团为旋转中心)。
+// 把自由视角的旋转中心平滑移到"当前聚焦团/可见人物"的质心:点亮/熄灭、筛选或高亮变化后,
+// 镜头绕聚焦团转,而非绕整个关系网的原点转(例如只点亮一个朝代时,以该朝代的云团为旋转中心)。
 function recenterOnVisible() {
   if (!built) return
   if (focusedId != null) return   // 聚焦某人物时不抢中心(聚焦有自己的机位)
+  // 有事件组/人物高亮:统一以聚焦团质心为中心
+  if (highlightNodeIds.value.size || currentHighlightId != null) {
+    focusTarget.copy(resolveFocusCenter())
+    return
+  }
+  // 其余(朝代筛选/点亮熄灭下的自由视角):以可见人物质心为中心
   const c = new THREE.Vector3()
   let n = 0
   nodes.forEach((p) => {
@@ -1093,11 +1166,66 @@ function recenterOnVisible() {
   focusTarget.copy(c)
 }
 
+// 命中当前朝代筛选的节点 id 数组(空筛选时返回空数组)
+function dynastyIds(): number[] {
+  return props.dynastyFilter.length
+    ? nodes.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty))).map((p) => p.id)
+    : []
+}
+
+// 统一"聚焦中心"判定:单聚焦已重排到原点 → ORIGIN;事件组/人物高亮/朝代筛选 → 各自 homePos 质心;否则全网原点。
+// 让镜头在任何聚焦/高亮态下都以"聚焦团"为旋转中心,避免多步操作后中心漂回全网。
+function resolveFocusCenter(): THREE.Vector3 {
+  if (focusedId != null) return ORIGIN.clone()
+  let ids: number[] = []
+  if (highlightNodeIds.value.size) ids = [...highlightNodeIds.value]
+  else if (currentHighlightId != null) ids = [currentHighlightId]
+  else ids = dynastyIds()
+  if (!ids.length) return ORIGIN.clone()
+  const c = new THREE.Vector3()
+  let n = 0
+  for (const id of ids) {
+    const g = nodeGroupMap[id]
+    if (!g) continue
+    c.add(g.userData.homePos as THREE.Vector3)
+    n++
+  }
+  return n ? c.divideScalar(n) : ORIGIN.clone()
+}
+
 // 点亮一组人物(事件相关人物):只突出这些节点与其间连线,并让镜头框住所有人
 function highlightPersons(ids: number[]) {
   highlightNodeIds.value = new Set(ids)
   applyHighlight()
   framePersons(ids)
+}
+
+// 计算一组节点的框选中心与距离(以 homePos 算包围球):返回 null 表示无有效节点。
+function frameCenter(ids: number[]): { center: THREE.Vector3; dist: number } | null {
+  const center = new THREE.Vector3()
+  let n = 0
+  for (const id of ids) {
+    const g = nodeGroupMap[id]
+    if (!g) continue
+    center.add(g.userData.homePos as THREE.Vector3)
+    n++
+  }
+  if (!n) return null
+  center.divideScalar(n)
+
+  let r = 0
+  for (const id of ids) {
+    const g = nodeGroupMap[id]
+    if (!g) continue
+    r = Math.max(r, (g.userData.homePos as THREE.Vector3).distanceTo(center))
+  }
+  r = Math.max(r, 26) // 单个节点也保持一定距离,别怼脸
+
+  // 距离 = (包围球半径 + 余量) / sin(较小半视场角),保证所有人都落在画面内
+  const vHalf = (camera.fov * Math.PI) / 360
+  const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect)
+  const dist = (r + 18) / Math.sin(Math.min(vHalf, hHalf))
+  return { center, dist }
 }
 
 // 镜头框选:把相机对准这些节点的中心,拉远到刚好能装下它们的最大距离(靠推进/拉远透视放大,而非撑大头像)
@@ -1108,31 +1236,9 @@ function framePersons(ids: number[]) {
   focusedId = null
   startRelayout(null)
 
-  // 以原始布局位置(homePos)算包围球:退焦重排复位后参与者正好落进框内
-  const center = new THREE.Vector3()
-  let n = 0
-  for (const id of ids) {
-    const g = nodeGroupMap[id]
-    if (!g) continue
-    center.add(g.userData.homePos as THREE.Vector3)
-    n++
-  }
-  if (!n) return
-  center.divideScalar(n)
-
-  let r = 0
-  for (const id of ids) {
-    const g = nodeGroupMap[id]
-    if (!g) continue
-    r = Math.max(r, (g.userData.homePos as THREE.Vector3).distanceTo(center))
-  }
-  r = Math.max(r, 26) // 单个参与者也保持一定距离,别怼脸
-
-  // 距离 = (包围球半径 + 余量) / sin(较小半视场角),保证所有人都落在画面内
-  const vHalf = (camera.fov * Math.PI) / 360
-  const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect)
-  const dist = (r + 18) / Math.sin(Math.min(vHalf, hHalf))
-  startFocusAnim(orbitQ.clone(), center, dist)
+  const fc = frameCenter(ids)
+  if (!fc) return
+  startFocusAnim(orbitQ.clone(), fc.center, fc.dist)
 }
 
 // 聚焦过渡缓动:easeInOutCubic
@@ -1421,7 +1527,9 @@ watch(
   () => props.active,
   (a) => {
     if (!a) {
-      // 离开关系网:定格当前机位,供下次进入恢复
+      // 离开关系网:若仍残留单人物聚焦(人物已关闭但聚焦态未退),先立即回退排布与镜头,再定格,
+      // 避免 saveCamera 定格聚焦机位,切回来时还带着已关闭人物的聚焦。
+      if (focusedId != null) commitRevertFocus()
       saveCamera()
       return
     }
@@ -1442,10 +1550,19 @@ watch(
 watch(
   () => props.highlightId,
   (pid) => {
+    const hadFocus = focusedId != null
     currentHighlightId = pid ?? null
     dimmedEdges.value = new Set() // 切换聚焦人物:清空熄灭集合,其关系默认全亮
     highlightNodeIds.value = new Set() // 事件人物点亮让位于人物聚焦
     applyHighlight()
+    if (pid == null) {
+      // 人物关闭(关闭按钮/ESC/切换视图):聚焦与关系网排布一起回退,与点空白一致。
+      if (hadFocus) revertFocus()
+      return
+    }
+    // 兜底:正常路径聚焦人物会由 focusPerson 同步驱动镜头;若高亮已立但未聚焦(如构建未就绪),
+    // 统一把镜头中心对齐到该人物,保证"高亮即聚焦团为中心"。
+    if (focusedId == null) recenterOnVisible()
   },
 )
 
@@ -1483,7 +1600,7 @@ onBeforeUnmount(() => {
   teardown()
 })
 
-defineExpose({ focusPerson, toggleEdgeHighlight, highlightPersons })
+defineExpose({ focusPerson, toggleEdgeHighlight, highlightPersons, resetToGlobal })
 </script>
 
 <template>

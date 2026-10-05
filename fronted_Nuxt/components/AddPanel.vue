@@ -429,7 +429,7 @@ async function submitEvent() {
                       <button type="button" class="ap-dir-btn" :class="{ on: pRel.dir !== 2 }" @click="pRel.dir = cycleDir(pRel.dir)">
                         {{ DIR_ICONS[pRel.dir] }}
                       </button>
-                      <AppSelect v-model="pRel.to" :options="personOptions" placeholder="选择已有人物" />
+                      <AppSelect v-model="pRel.to" :options="personOptions" placeholder="选择已有人物" searchable search-placeholder="搜索人物…" />
                     </div>
                     <span class="ap-dir-lab">{{ P_REL_LABELS[pRel.dir] }}</span>
                   </div>
@@ -449,11 +449,11 @@ async function submitEvent() {
               <div class="ap-field">
                 <label>人物</label>
               <div class="ap-dir-row">
-                <AppSelect v-model="rForm.a" :options="personOptions" placeholder="人物 A" />
+                <AppSelect v-model="rForm.a" :options="personOptions" placeholder="人物 A" searchable search-placeholder="搜索人物…" />
                 <button type="button" class="ap-dir-btn" :class="{ on: rForm.dir !== 2 }" @click="rForm.dir = cycleDir(rForm.dir)">
                   {{ DIR_ICONS[rForm.dir] }}
                 </button>
-                <AppSelect v-model="rForm.b" :options="personOptions" placeholder="人物 B" />
+                <AppSelect v-model="rForm.b" :options="personOptions" placeholder="人物 B" searchable search-placeholder="搜索人物…" />
               </div>
               <span class="ap-dir-lab">{{ R_REL_LABELS[rForm.dir] }}</span>
             </div>
@@ -473,7 +473,7 @@ async function submitEvent() {
               <div class="ap-pair">
               <div class="ap-field">
                 <label>参与者</label>
-                <AppSelect v-model="eForm.person" :options="personOptions" placeholder="选择人物" />
+                <AppSelect v-model="eForm.person" :options="personOptions" placeholder="选择人物" searchable search-placeholder="搜索人物…" />
               </div>
               <div class="ap-field">
                 <label>定位</label>

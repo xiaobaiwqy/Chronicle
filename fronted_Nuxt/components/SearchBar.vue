@@ -29,6 +29,24 @@ interface Result {
   tag: string // 类型标注:人物 / 记录 / 朝代 / 关系
 }
 
+// 历史记录项(点选结果,可再次点击跳转)
+interface HistoryItem {
+  key: string
+  type: ResultType
+  id: number
+  label: string
+  sub: string
+  color: string
+}
+const TYPE_TAG: Record<ResultType, string> = {
+  person: '人物',
+  event: '记录',
+  dynasty: '朝代',
+  relation: '关系',
+}
+const HISTORY_KEY = 'chronicle.searchHistory'
+const history = ref<HistoryItem[]>([])
+
 // 关系两端人物名映射(id -> 名字)
 const personsById = computed(() => {
   const m = new Map<number, Person>()
@@ -121,14 +139,61 @@ function onEnter() {
 }
 
 function pick(r: Result) {
+  pushHistory(r)
+  activate(r)
+  closePop()
+}
+
+// —— 最近搜索历史:localStorage 持久化,点击再次跳转,支持单条删除 ——
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    if (!raw) return
+    const arr = JSON.parse(raw)
+    if (Array.isArray(arr)) {
+      history.value = arr
+        .filter((h): h is HistoryItem => h && typeof h.key === 'string' && !!TYPE_TAG[h.type as ResultType])
+        .slice(0, 5)
+    }
+  } catch {}
+}
+
+function saveHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value))
+  } catch {}
+}
+
+function pushHistory(r: HistoryItem) {
+  history.value = [r, ...history.value.filter((h) => h.key !== r.key)].slice(0, 5)
+  saveHistory()
+}
+
+function activate(r: { type: ResultType; id: number; color: string }) {
   if (r.type === 'person') emit('select-person', r.id)
   else if (r.type === 'event') emit('select-event', r.id)
   else if (r.type === 'dynasty') emit('select-dynasty', r.color)
   else if (r.type === 'relation') emit('select-relation', r.id)
+}
+
+function closePop() {
   query.value = ''
   open.value = false
   inputEl.value?.blur()
 }
+
+function pickHistory(h: HistoryItem) {
+  pushHistory(h)
+  activate(h)
+  closePop()
+}
+
+function removeHistory(key: string) {
+  history.value = history.value.filter((h) => h.key !== key)
+  saveHistory()
+}
+
+onMounted(loadHistory)
 
 function onBlur() {
   // 延迟关闭,让点击结果先触发
@@ -157,7 +222,7 @@ defineExpose({ focus })
       placeholder="搜索人物、记录、朝代、关系…"
       @input="onInput"
       @keydown.enter="onEnter"
-      @focus="open = !!query"
+      @focus="open = true"
       @blur="onBlur"
     />
   </div>
@@ -173,5 +238,17 @@ defineExpose({ focus })
       </div>
     </template>
     <div v-else class="search-empty">无匹配结果</div>
+  </div>
+  <div v-else-if="open && !query.trim() && history.length" class="search-pop">
+    <div class="search-hist-hd">最近搜索</div>
+    <div v-for="h in history" :key="h.key" class="search-item" @mousedown.prevent="pickHistory(h)">
+      <span class="dot" :style="{ background: h.color }"></span>
+      <div class="txt">
+        <div class="t">{{ h.label }}</div>
+        <div class="sub">{{ h.sub }}</div>
+      </div>
+      <span class="tag" :class="`tag-${h.type}`">{{ TYPE_TAG[h.type] }}</span>
+      <button class="search-hist-del" title="删除" @mousedown.stop.prevent="removeHistory(h.key)">✕</button>
+    </div>
   </div>
 </template>

@@ -41,10 +41,15 @@ function labelMinWidth(name: string): number {
 
 // —— 多档位垂直排布:事件上下各 2 档、人物上下各 3 档 ——
 // 每档用不同 stem 高度把卡片/头像抬离轴线;最近档的 stem 已留出足够距离,保证不遮住轴线。
-const EV_TIERS = [48, 122] // 事件 stem 高度(上下对称)
+// 事件卡片高度不定(标题折行 + 参与者人名胶囊 2~3 排):内档固定,外档 stem 按「同侧内档最高卡片」自适应抬高。
+const EV_INNER_STEM = 48 // 事件内档 stem(近轴,固定)
+const EV_TIER_COUNT = 2 // 事件上下各 2 档(内档 + 外档)
+const EV_LANES = EV_TIER_COUNT * 2 // 事件 4 个横向车道(上内/下内/上外/下外)
+const EV_OUTER_MARGIN = 8 // 外档相对内档卡片顶的额外呼吸留白(不含抖动)
 const AV_TIERS = [50, 130, 210] // 人物 stem 高度(上下对称)
 const EV_JITTER = 8 // 事件每档随机上下浮动范围(px)
 const AV_JITTER = 9 // 人物每档随机上下浮动范围(px)
+const MAX_EV_PARTS = 6 // 事件卡片最多展示的参与者数,超出折叠为 +N(约束卡片高度上限)
 
 // 生卒标注(人名 + 生卒)横向占宽:按实际文字估算(中文≈字号宽、数字/符号≈0.6em),数据无关、不写死像素。
 // 取全量有年份人物中的最大值作为相邻标注最小间距,保证放大到最大时所有标注互不重叠。
@@ -250,7 +255,7 @@ interface Cluster {
 const clusterUnit = computed(() => (props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP))
 const clusters = computed<Cluster[]>(() => {
   const unit = clusterUnit.value
-  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_LANES
   const open = binOpen(zoom.value)
   const out: Cluster[] = []
   if (props.mode === 'people') {
@@ -359,9 +364,9 @@ const undatedCards = computed(() => {
     color: dynastyColor(e.dynasty),
     x: band.x0 + PAD / 2 + i * unit * zoom.value,
     above: i % 2 === 0,
-    stem: EV_TIERS[0] + jitterFor(e.id, EV_JITTER),
+    stem: EV_INNER_STEM + jitterFor(e.id, EV_JITTER),
     shown: true,
-    z: EV_TIERS.length,
+    z: EV_TIER_COUNT,
   }))
   // 与有年份事件一致:上下两侧各自独立去重,同侧横向间距 < unit 时隐藏后者(隐藏项保留在 DOM 中淡入淡出),
   // 选中事件强制保留;放大拉开间距后逐个显现。
@@ -411,6 +416,28 @@ const singleBand = computed(() => {
   return litItems.value.filter((d) => d.x1 > x0 && d.x0 < x1).length <= 1
 })
 
+// 单板块态去抖:缩放/拖拽过程中 singleBand 会在边界反复翻转,直接联动会让钉住的文字闪烁。
+// 延迟一小段稳定期后再切换,保证只有视口稳定在「只剩一个板块」时文字才出现/消失。
+const singleBandStable = ref(false)
+let singleBandTimer: ReturnType<typeof setTimeout> | null = null
+watch(singleBand, (v) => {
+  if (singleBandTimer) clearTimeout(singleBandTimer)
+  singleBandTimer = setTimeout(() => {
+    singleBandStable.value = v
+  }, 180)
+})
+
+// 单板块钉住的背景文字:放大/拖到只剩一个点亮朝代块时,该块名 + 起止年 + 记录数固定在屏幕下方中间,
+// 不随板块滚动(板块比视口宽时,块内居中的标签会被滚出屏幕)。
+const singleBandInfo = computed(() => {
+  if (!singleBandStable.value) return null
+  const x0 = scrollLeft.value
+  const x1 = scrollLeft.value + (viewW.value || 1)
+  const d = litItems.value.find((b) => b.x1 > x0 && b.x0 < x1)
+  if (!d) return null
+  return { name: d.name, color: d.color, years: `${yrFmt(d.s)}–${yrFmt(d.e)}`, count: d.count }
+})
+
 // 非均匀刻度:每个朝代的起始年 + 时间线末端 + 事件年份,按像素间距去重
 const ticks = computed(() => {
   const years = new Set<number>()
@@ -436,8 +463,47 @@ const ticks = computed(() => {
 //   2. 同年超出容量时按「列优先」横向展开(第几列 = 序号÷容量),列间距一个位宽,随缩放平滑展开;
 //   3. 档位贪心分配:所有卡片按 x 排序后从左到右,每张先占第一个能横向放下的档位(横向间距 ≥ 位宽);
 //      收缩时相邻卡片先挤到不同档位,所有档位都放不下才隐藏 —— 充分利用上下档位,而非直接消失。
+//   4. 外档 stem 自适应:卡片高度不定,外档抬高到「同侧内档最高卡片顶」之上,上下不重叠。
+
+// 估算文字像素宽(中文≈字号宽、ASCII≈0.6em),用于推算卡片标题/胶囊折行。
+function pxTextW(s: string, cjk: number): number {
+  let w = 0
+  for (const ch of s) w += ch >= '一' && ch <= '鿿' ? cjk : cjk * 0.6
+  return w
+}
+
+// 参与者胶囊按实际宽度贪心折行,返回排数(卡片内容宽 = CARD_W - 22 内边距)。
+function chipRows(names: string[]): number {
+  const inner = CARD_W - 22
+  const gap = 4
+  let rows = 0
+  let cur = 0
+  for (const n of names) {
+    const w = Math.ceil(pxTextW(n, 10.5)) + 20 // 胶囊宽 = 文字 + 左右 padding 18 + 边框 2
+    if (cur > 0 && cur + gap + w > inner) { rows++; cur = w }
+    else cur = cur > 0 ? cur + gap + w : w
+  }
+  if (cur > 0) rows++
+  return rows
+}
+
+// 事件卡片估算高度(px):上下 padding + 标题折行 + 年份行 + 参与者胶囊折行。供外档 stem 自适应。
+function evCardHeight(e: ChronicleEvent): number {
+  const inner = CARD_W - 22
+  const titleLines = Math.max(1, Math.ceil(pxTextW(e.title, 12.5) / inner))
+  let h = 16 + titleLines * 17 + 14 // 上下 padding + 标题 + 年份
+  const names = e.participants.slice(0, MAX_EV_PARTS).map((x) => x.name)
+  const extra = e.participants.length - MAX_EV_PARTS
+  if (extra > 0) names.push('+' + extra)
+  if (names.length) {
+    const rows = chipRows(names)
+    h += 6 + rows * 23 + (rows - 1) * 4
+  }
+  return h
+}
+
 const cards = computed(() => {
-  const laneCount = EV_TIERS.length * 2
+  const laneCount = EV_LANES
   const unit = CARD_W + CARD_GAP
   const open = binOpen(zoom.value)
   // 展平:每个事件一个候选(先只定 x,档位随后全局贪心分配)
@@ -451,7 +517,7 @@ const cards = computed(() => {
   items.sort((a, b) => a.x - b.x || a.e.id - b.e.id)
   // 全局贪心分配档位:每个档位记住最后占用的 x,横向间距 ≥ 位宽才算放下。
   const lastX = new Array<number>(laneCount).fill(-Infinity)
-  const placed: { e: ChronicleEvent; color: string; x: number; above: boolean; stem: number; shown: boolean; z: number }[] = items.map((it) => {
+  const assigned = items.map((it) => {
     const isSel = it.e.id === props.selectedEventId
     let lane = -1
     for (let l = 0; l < laneCount; l++) {
@@ -461,9 +527,26 @@ const cards = computed(() => {
     const shown = lane >= 0
     if (shown) lastX[lane] = it.x
     const l = Math.max(0, lane)
-    const tier = Math.floor(l / 2)
-    return { e: it.e, color: it.color, x: it.x, above: l % 2 === 0, stem: EV_TIERS[tier] + jitterFor(it.e.id, EV_JITTER), shown, z: laneCount / 2 - tier }
+    return { e: it.e, color: it.color, x: it.x, lane: l, above: l % 2 === 0, tier: Math.floor(l / 2), shown, h: evCardHeight(it.e) }
   })
+  // 同侧内档(lane 0 上 / lane 1 下)最高卡高 → 决定该侧外档 stem(外档抬到内档顶之上,含抖动余量)。
+  const innerMax = [0, 0]
+  for (const a of assigned) {
+    if (a.tier === 0 && a.shown) {
+      const side = a.above ? 0 : 1
+      innerMax[side] = Math.max(innerMax[side], a.h)
+    }
+  }
+  const outerStem = (above: boolean) => EV_INNER_STEM + innerMax[above ? 0 : 1] + EV_JITTER * 2 + EV_OUTER_MARGIN
+  const placed = assigned.map((a) => ({
+    e: a.e,
+    color: a.color,
+    x: a.x,
+    above: a.above,
+    stem: (a.tier === 0 ? EV_INNER_STEM : outerStem(a.above)) + jitterFor(a.e.id, EV_JITTER),
+    shown: a.shown,
+    z: laneCount / 2 - a.tier,
+  }))
   return placed
 })
 
@@ -537,7 +620,7 @@ function densityZoom(years: number[], unit: number, capacity: number): number {
 const zoomMax = computed(() => {
   const needBin = BIN_FULL_AT
   const unit = props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP
-  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_LANES
   const years = props.mode === 'people'
     ? filteredPeople.value.map((p) => personAnchorYear(p)!)
     : filteredDated.value.map((e) => e.year_start)
@@ -554,7 +637,7 @@ const zoomMax = computed(() => {
 // 与全局 zoomMax 同构:max(同年 bin 展开, 块内最挤「容量+1」跨度, 块标签放下),必然 ≤ 全局 zoomMax。
 function bandDataZoom(seg: { name: string; s: number; e: number }): number {
   const unit = props.mode === 'people' ? yearLabelW.value : CARD_W + CARD_GAP
-  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_TIERS.length * 2
+  const capacity = props.mode === 'people' ? AV_TIERS.length * 2 : EV_LANES
   const years = props.mode === 'people'
     ? filteredPeople.value.filter((p) => personAnchorYear(p)! >= seg.s && personAnchorYear(p)! <= seg.e).map((p) => personAnchorYear(p)!)
     : filteredDated.value.filter((e) => e.year_start >= seg.s && e.year_start <= seg.e).map((e) => e.year_start)
@@ -634,7 +717,6 @@ function yearAtX(x: number): number {
 // 滚动锚点随 zoom 逐帧校正(如缩放时保持中心年份不动),因此 bin 展开/收缩带来的坐标轴位移被平滑过渡,不再"跳一下"。
 // 与"每个事件重启一段动画"不同:高频滚轮(触控板惯性/各浏览器)只更新目标值、由同一循环持续跟随,
 // 不会因反复重启缓动而方向错乱或缩放抖动;并归一化 deltaMode,消除各浏览器滚轮灵敏度差异。
-let focusedS: number | null = null
 let zoomTarget = 1
 let scrollAt: (() => number) | null = null
 let zoomTau = 90
@@ -826,17 +908,11 @@ function onTrackWheel(e: WheelEvent) {
 function focusBand(seg: { name: string; s: number; e: number; w: number; x0: number; x1: number }) {
   if (dragMoved > 6) return
   const vw = wrapEl.value!.clientWidth
-  if (focusedS === seg.s) {
-    // 再次点击:恢复全局视图(居中整条时间线),不裁剪任何区域
-    focusedS = null
-    animateTo(1, () => (totalW.value - vw) / 2, 420)
-  } else {
-    focusedS = seg.s
-    // 点击分块:放大到「块内全部事件/人物可见」所需的放大倍数(bandDataZoom),而非铺满视口。
-    const targetZoom = clampZoom(bandDataZoom(seg))
-    // 用分块起止年的实时像素(X 随当前 zoom 逐帧重算)作为滚动目标,保证聚焦跟随缩放、不漂移到左端
-    animateTo(targetZoom, () => (xOf(seg.s) + xOf(seg.e)) / 2 - vw / 2, 420)
-  }
+  // 点击分块只放大到「块内全部事件/人物可见」所需的放大倍数(bandDataZoom),不再二次点击缩小;
+  // 点击不同块则切换聚焦目标到该块。
+  const targetZoom = clampZoom(bandDataZoom(seg))
+  // 用分块起止年的实时像素(X 随当前 zoom 逐帧重算)作为滚动目标,保证聚焦跟随缩放、不漂移到左端
+  animateTo(targetZoom, () => (xOf(seg.s) + xOf(seg.e)) / 2 - vw / 2, 420)
 }
 
 // 搜索框选中事件:平滑放大到事件可见并滚动居中到该事件(高亮由 selectedEventId 驱动)。
@@ -928,6 +1004,7 @@ watch(
 onBeforeUnmount(() => {
   stopZoom()
   stopScrollAnim()
+  if (singleBandTimer) clearTimeout(singleBandTimer)
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -949,7 +1026,7 @@ onBeforeUnmount(() => {
         :style="{ left: d.x0 + 'px', width: d.w + 'px', '--dc': d.color }"
         @click="focusBand(d)"
       >
-        <div v-if="!skeletonLabelHidden.has(d.name + d.s) && labelFits(d)" class="dyn-lab"><span class="dyn-name">{{ d.name }}</span><span class="dyn-yrs">{{ yrFmt(d.s) }}–{{ yrFmt(d.e) }}</span><span class="dyn-cnt">当前记录 {{ d.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
+        <div v-if="!skeletonLabelHidden.has(d.name + d.s) && labelFits(d) && !singleBandStable" class="dyn-lab"><span class="dyn-name">{{ d.name }}</span><span class="dyn-yrs">{{ yrFmt(d.s) }}–{{ yrFmt(d.e) }}</span><span class="dyn-cnt">当前记录 {{ d.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
       </div>
       <div
         v-for="d in overlayItems"
@@ -958,7 +1035,7 @@ onBeforeUnmount(() => {
         :style="{ left: d.x0 + 'px', width: d.w + 'px', '--dc': d.color }"
         @click="focusBand(d)"
       >
-        <div v-if="labelFits(d)" class="dyn-lab"><span class="dyn-name">{{ d.name }}</span><span class="dyn-yrs">{{ yrFmt(d.s) }}–{{ yrFmt(d.e) }}</span><span class="dyn-cnt">当前记录 {{ d.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
+        <div v-if="labelFits(d) && !singleBandStable" class="dyn-lab"><span class="dyn-name">{{ d.name }}</span><span class="dyn-yrs">{{ yrFmt(d.s) }}–{{ yrFmt(d.e) }}</span><span class="dyn-cnt">当前记录 {{ d.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
       </div>
       <div
         v-if="undatedBand.count"
@@ -968,6 +1045,13 @@ onBeforeUnmount(() => {
         <div class="dyn-lab"><span class="dyn-name">不详</span><span class="dyn-yrs">未定年</span><span class="dyn-cnt">当前记录 {{ undatedBand.count }} {{ mode === 'people' ? '人物' : '事件' }}</span></div>
       </div>
       <div class="tl-axis" :class="{ flow: flowOn }"></div>
+      <Transition name="tl-single">
+        <div v-if="singleBandInfo" class="tl-single-lab" :style="{ color: singleBandInfo.color }">
+          <span class="dyn-name">{{ singleBandInfo.name }}</span>
+          <span class="dyn-yrs">{{ singleBandInfo.years }}</span>
+          <span class="dyn-cnt">当前记录 {{ singleBandInfo.count }} {{ mode === 'people' ? '人物' : '事件' }}</span>
+        </div>
+      </Transition>
       <div v-for="y in ticks" :key="y" class="tl-tick" :style="{ left: xOf(y) + 'px' }">
         <span>{{ yrFmt(y) }}</span>
       </div>
@@ -987,6 +1071,17 @@ onBeforeUnmount(() => {
               <div class="bx" @click.stop="onCard(c.e.id)">
                 <div class="t">{{ c.e.title }}</div>
                 <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
+                <div v-if="c.e.participants.length" class="tl-ev-ps">
+                  <span
+                    v-for="x in c.e.participants.slice(0, MAX_EV_PARTS)"
+                    :key="x.person_id"
+                    class="tl-ev-p"
+                    :style="{ '--pc': x.color || dynastyColor(x.dynasty) }"
+                    :title="x.name + (x.role ? ' · ' + x.role : '')"
+                    @click.stop="onPerson(x.person_id)"
+                  >{{ x.name }}</span>
+                  <span v-if="c.e.participants.length > MAX_EV_PARTS" class="tl-ev-more">+{{ c.e.participants.length - MAX_EV_PARTS }}</span>
+                </div>
               </div>
               <div class="stem"></div>
               <div class="nd"></div>
@@ -999,6 +1094,17 @@ onBeforeUnmount(() => {
               <div class="bx" @click.stop="onCard(c.e.id)">
                 <div class="t">{{ c.e.title }}</div>
                 <div class="who">{{ yrRange(c.e.year_start, c.e.year_end, c.e.year_approx) }}</div>
+                <div v-if="c.e.participants.length" class="tl-ev-ps">
+                  <span
+                    v-for="x in c.e.participants.slice(0, MAX_EV_PARTS)"
+                    :key="x.person_id"
+                    class="tl-ev-p"
+                    :style="{ '--pc': x.color || dynastyColor(x.dynasty) }"
+                    :title="x.name + (x.role ? ' · ' + x.role : '')"
+                    @click.stop="onPerson(x.person_id)"
+                  >{{ x.name }}</span>
+                  <span v-if="c.e.participants.length > MAX_EV_PARTS" class="tl-ev-more">+{{ c.e.participants.length - MAX_EV_PARTS }}</span>
+                </div>
               </div>
             </template>
           </div>

@@ -13,6 +13,10 @@ class RelationCreate(RelationBase):
     pass
 
 
+class RelationUpdate(RelationBase):
+    pass
+
+
 class Relation(RelationBase):
     model_config = ConfigDict(from_attributes=True)
 

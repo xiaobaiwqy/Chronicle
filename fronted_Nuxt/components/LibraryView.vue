@@ -298,6 +298,30 @@ const personList = computed(() =>
 const eventList = computed(() =>
   [...events.value].sort((a, b) => (a.year_start ?? Infinity) - (b.year_start ?? Infinity)),
 )
+
+// —— 库内搜索定位:按关键词过滤人物/事件列表 ——
+const pQuery = ref('')
+const eQuery = ref('')
+const pFiltered = computed(() => {
+  const q = pQuery.value.trim().toLowerCase()
+  if (!q) return personList.value
+  return personList.value
+    .filter((p) =>
+      [p.name, p.dynasty, ...(p.secondary_dynasties || []), p.identity, p.summary].join(' ').toLowerCase().includes(q),
+    )
+    // 排序(不改匹配范围):人名命中优先,其余按出生年保持原有顺序
+    .sort((a, b) => (a.name.toLowerCase().includes(q) ? 0 : 1) - (b.name.toLowerCase().includes(q) ? 0 : 1))
+})
+const eFiltered = computed(() => {
+  const q = eQuery.value.trim().toLowerCase()
+  if (!q) return eventList.value
+  return eventList.value
+    .filter((e) =>
+      [e.title, e.description, e.dynasty, e.participants.map((x) => x.name).join(' ')].join(' ').toLowerCase().includes(q),
+    )
+    // 排序(不改匹配范围):事件名称命中优先,其余按年份保持原有顺序
+    .sort((a, b) => (a.title.toLowerCase().includes(q) ? 0 : 1) - (b.title.toLowerCase().includes(q) ? 0 : 1))
+})
 </script>
 
 <template>
@@ -319,6 +343,11 @@ const eventList = computed(() =>
               <template v-if="pMode === 'list'">＋ 新增人物</template>
               <template v-else>返回列表</template>
             </button>
+          </div>
+
+          <div v-if="pMode === 'list'" class="lib-search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.4-4.4" /></svg>
+            <input v-model="pQuery" type="text" placeholder="搜索人物…" />
           </div>
 
           <div class="lib-list">
@@ -410,7 +439,7 @@ const eventList = computed(() =>
 
             <!-- 人物卡片列表 -->
             <template v-else>
-              <div v-for="p in personList" :key="'p' + p.id" class="lib-card-item">
+              <div v-for="p in pFiltered" :key="'p' + p.id" class="lib-card-item">
                 <div class="lib-av" :style="{ background: dynastyColor(p.dynasty) }">
                   <img v-if="personAvatar(p)" :src="personAvatar(p)" alt="" />
                   <span v-else>{{ personInitial(p) }}</span>
@@ -428,7 +457,7 @@ const eventList = computed(() =>
                   <button type="button" class="mini-del" title="删除" @click="askDelete('person', p.id, p.name)">✕</button>
                 </div>
               </div>
-              <span v-if="!personList.length" class="empty">暂无人物</span>
+              <span v-if="!pFiltered.length" class="empty">{{ pQuery.trim() ? '无匹配人物' : '暂无人物' }}</span>
             </template>
           </div>
         </div>
@@ -442,6 +471,11 @@ const eventList = computed(() =>
               <template v-if="eMode === 'list'">＋ 新增事件</template>
               <template v-else>返回列表</template>
             </button>
+          </div>
+
+          <div v-if="eMode === 'list'" class="lib-search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.4-4.4" /></svg>
+            <input v-model="eQuery" type="text" placeholder="搜索事件…" />
           </div>
 
           <div class="lib-list">
@@ -460,7 +494,7 @@ const eventList = computed(() =>
               <div class="ap-field">
                 <label>参与者</label>
                 <div class="lib-part-row" v-for="(pt, i) in evForm.participants" :key="i">
-                  <AppSelect v-model="pt.person_id" :options="personOptions" placeholder="选择人物" />
+                  <AppSelect v-model="pt.person_id" :options="personOptions" placeholder="选择人物" searchable search-placeholder="搜索人物…" />
                   <input v-model="pt.role" class="ap-inp lib-part-role" placeholder="定位,如 主将" />
                   <button type="button" class="mini-del" title="移除参与者" :disabled="evForm.participants.length <= 1" @click="removeParticipant(i)">✕</button>
                 </div>
@@ -480,7 +514,7 @@ const eventList = computed(() =>
 
             <!-- 事件卡片列表 -->
             <template v-else>
-              <div v-for="e in eventList" :key="'e' + e.id" class="lib-card-item">
+              <div v-for="e in eFiltered" :key="'e' + e.id" class="lib-card-item">
                 <div class="lib-info">
                   <div class="lib-nm">{{ e.title }}</div>
                   <div class="lib-meta">
@@ -493,7 +527,7 @@ const eventList = computed(() =>
                   <button type="button" class="mini-del" title="删除" @click="askDelete('event', e.id, e.title)">✕</button>
                 </div>
               </div>
-              <span v-if="!eventList.length" class="empty">暂无事件</span>
+              <span v-if="!eFiltered.length" class="empty">{{ eQuery.trim() ? '无匹配事件' : '暂无事件' }}</span>
             </template>
           </div>
         </div>

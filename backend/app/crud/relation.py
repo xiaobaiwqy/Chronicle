@@ -25,6 +25,16 @@ def create_relation(db: Session, data: schemas.RelationCreate) -> models.Relatio
     return relation
 
 
+def update_relation(db: Session, relation: models.Relation, data: schemas.RelationUpdate) -> models.Relation:
+    relation.from_person_id = data.from_person_id
+    relation.to_person_id = data.to_person_id
+    relation.label = data.label or ""
+    relation.directed = data.directed
+    db.commit()
+    db.refresh(relation)
+    return relation
+
+
 def delete_relation(db: Session, relation: models.Relation) -> None:
     db.delete(relation)
     db.commit()

@@ -20,6 +20,7 @@ const graphRef = ref<{
   focusPerson: (id: number) => void
   toggleEdgeHighlight: (id: number) => void
   highlightPersons: (ids: number[]) => void
+  resetToGlobal: () => void
 } | null>(null)
 const timelineRef = ref<{ focusEvent: (id: number) => void } | null>(null)
 
@@ -80,10 +81,10 @@ const graphReady = computed(() => graphNodes.value.length > 0)
 const highlightId = computed(() => selectedPersonId.value)
 const selectedEvent = computed(() => events.value.find((e) => e.id === selectedEventId.value) ?? null)
 
-async function openPerson(id: number) {
+async function openPerson(id: number, focusGraph = true) {
   selectedPersonId.value = id
-  // 搜索与点击头像效果一致:聚焦并放大该人物,镜头绕其旋转
-  graphRef.value?.focusPerson(id)
+  // 搜索与点击头像效果一致:聚焦并放大该人物,镜头绕其旋转(时间线来源不聚焦,避免影响关系网排布)
+  if (focusGraph) graphRef.value?.focusPerson(id)
   const detail = await fetchDetail(id)
   // 防止快速连续点击导致的乱序响应
   if (selectedPersonId.value === id) personDetail.value = detail
@@ -100,14 +101,26 @@ function onSelectPerson(id: number) {
   openPerson(id)
 }
 
-// 点击关系网空白处:回退一步 —— 先退出人物/事件聚焦(背景朝代筛选仍在,朝代高亮随之恢复),再退回自由视角(清除朝代筛选)
+// 时间线点击头像:只打开人物抽屉,不聚焦/重排关系网(两个视图的状态隔开)
+function onTimelinePerson(id: number) {
+  closeEvent()
+  openPerson(id, false)
+}
+
+// 点击关系网空白处:仅单人物/事件聚焦回退(关抽屉/事件);群体(朝代筛选)保留,不轻易退出。
 function onBlank() {
-  if (selectedPersonId.value != null || selectedEventId.value != null) {
-    closePerson()
-    closeEvent()
-  } else if (dynastyFilter.value.length) {
-    dynastyFilter.value = []
-  }
+  if (selectedPersonId.value != null) closePerson()
+  if (selectedEventId.value != null) closeEvent()
+}
+
+// 一键回到初始界面:退出聚焦/筛选/事件组/熄灭连线,并重置关系网"点亮/熄灭"(左上角选框状态同步归零)
+function resetGlobal() {
+  closePerson()
+  closeEvent()
+  dynastyFilter.value = []
+  graphUnlit.value = []
+  dimmedRelationIds.value = []
+  graphRef.value?.resetToGlobal()
 }
 
 // 时间线/其它:点击事件聚焦首要参与人物,让对应的人在关系网中可见
@@ -264,7 +277,7 @@ onBeforeUnmount(() => {
         :dynasty-filter="dynastyFilter"
         :unlit-dynasties="timelineUnlit"
         @select-event="openEvent"
-        @select-person="onSelectPerson"
+        @select-person="onTimelinePerson"
       />
     </div>
   </div>
@@ -297,6 +310,14 @@ onBeforeUnmount(() => {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
       <path d="M12 5v14M5 12h14" />
     </svg>
+  </button>
+  <button v-if="view === 'graph'" class="global-btn" title="回到初始界面" @click="resetGlobal">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+    </svg>
+    <span class="tip">回到初始界面</span>
   </button>
   <PersonDrawer
     :open="!!personDetail"
