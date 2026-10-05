@@ -355,19 +355,19 @@ body{font-family:"PingFang SC","PingFang TC","Helvetica Neue",-apple-system,Blin
 .tl-scroll .tl-scroll-track{position:relative;width:170px;height:18px;flex:0 0 auto;cursor:grab;touch-action:none;background:transparent}
 .tl-scroll .tl-scroll-track:active{cursor:grabbing}
 .tl-scroll .tl-scroll-roller{position:absolute;inset:0;
-  background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.5) 0 1px,rgba(255,255,255,0) 1px 10px)}
+  background-image:repeating-linear-gradient(90deg,rgba(233,196,106,.26) 0 1px,rgba(233,196,106,0) 1px 10px)}
 .tl-scroll .tl-scroll-light{position:absolute;inset:0;pointer-events:none;
-  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.22) 50%,transparent 100%)}
+  background:linear-gradient(90deg,transparent 0%,transparent 8%,rgba(233,180,90,.06) 34%,rgba(255,225,160,.16) 50%,rgba(233,180,90,.06) 66%,transparent 92%,transparent 100%)}
 /* 四周渐隐:左右 18%、上下 35% 淡出到透明,两轴相交(intersect)后四边同时归零 */
 .tl-scroll .tl-scroll-roller,
 .tl-scroll .tl-scroll-light{
   -webkit-mask-image:
     linear-gradient(90deg,transparent 0%,#000 18%,#000 82%,transparent 100%),
-    linear-gradient(180deg,transparent 0%,#000 35%,#000 65%,transparent 100%);
+    linear-gradient(180deg,transparent 0%,#000 40%,#000 60%,transparent 100%);
   -webkit-mask-composite:source-in;
   mask-image:
     linear-gradient(90deg,transparent 0%,#000 18%,#000 82%,transparent 100%),
-    linear-gradient(180deg,transparent 0%,#000 35%,#000 65%,transparent 100%);
+    linear-gradient(180deg,transparent 0%,#000 40%,#000 60%,transparent 100%);
   mask-composite:intersect}
 
 /* ---------- 人物抽屉(深色玻璃 · 同添加面板) ---------- */

@@ -99,13 +99,38 @@ function isDated(e: ChronicleEvent): e is DatedEvent {
 }
 const datedEvents = computed(() => props.events.filter(isDated))
 const undatedEvents = computed(() => props.events.filter((e) => !isDated(e)))
+
+// 左上角"朝代/国家"勾选 → 按「时间区间」筛选,而非按事件/人物的朝代名匹配。
+// 有起止年份的朝代用时间区间(落在区间内即命中);只有名称、无年份的自定义朝代回退按名匹配。
+const selectedRanges = computed(() => {
+  if (!props.dynastyFilter.length) return [] as { s: number; e: number }[]
+  return toggleableDynastyBands(dynasties.value)
+    .filter((b) => props.dynastyFilter.includes(b.color))
+    .map((b) => ({ s: b.s, e: b.e }))
+})
+const selectedNoRangeNames = computed(() => {
+  if (!props.dynastyFilter.length) return new Set<string>()
+  return new Set(
+    dynasties.value
+      .filter((d) => d.start_year == null && props.dynastyFilter.includes(dynastyColor(d.name)))
+      .map((d) => d.name),
+  )
+})
+function dynastySelected(dynasty: string, year: number | null): boolean {
+  if (year != null) {
+    if (selectedRanges.value.some((r) => year >= r.s && year <= r.e)) return true
+    return selectedNoRangeNames.value.has(dynasty)
+  }
+  // 无年份(不详区块):没有时间可匹配,回退按朝代名/颜色匹配。
+  return props.dynastyFilter.includes(dynastyColor(dynasty))
+}
 const filteredDated = computed(() => {
   if (!props.dynastyFilter.length) return datedEvents.value
-  return datedEvents.value.filter((e) => props.dynastyFilter.includes(dynastyColor(e.dynasty)))
+  return datedEvents.value.filter((e) => dynastySelected(e.dynasty, e.year_start))
 })
 const filteredUndated = computed(() => {
   if (!props.dynastyFilter.length) return undatedEvents.value
-  return undatedEvents.value.filter((e) => props.dynastyFilter.includes(dynastyColor(e.dynasty)))
+  return undatedEvents.value.filter((e) => dynastySelected(e.dynasty, null))
 })
 
 // —— 人物(人物模式):锚定年份 —— 三个点依次判断:卒年落在自己朝代/国家区间内 → 用卒年;否则生年落在区间内 → 用生年;
@@ -128,11 +153,11 @@ const datedPeople = computed(() => props.persons.filter((p) => personAnchorYear(
 const undatedPeople = computed(() => props.persons.filter((p) => personAnchorYear(p) == null))
 const filteredPeople = computed(() => {
   if (!props.dynastyFilter.length) return datedPeople.value
-  return datedPeople.value.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty)))
+  return datedPeople.value.filter((p) => dynastySelected(p.dynasty, personAnchorYear(p)))
 })
 const filteredUndatedPeople = computed(() => {
   if (!props.dynastyFilter.length) return undatedPeople.value
-  return undatedPeople.value.filter((p) => props.dynastyFilter.includes(dynastyColor(p.dynasty)))
+  return undatedPeople.value.filter((p) => dynastySelected(p.dynasty, null))
 })
 
 // 人物标注(人名 + 生卒)所需的最小横向间距:取全量有年份人物中标注最宽者,再加留白。
