@@ -1,183 +1,138 @@
-# 人物志 (Chronicle)
+<h1 align="center">人物志 · Chronicle</h1>
 
-一个**本地优先**的历史人物关系与事件记录应用。用来在听历史内容时随手记录人物、事件与人物关系,并在一条时间线和一张立体关系网中浏览。
+<p align="center">
+  <strong>本地优先</strong>的历史人物 · 事件 · 关系记录应用<br>
+  边听历史边随手记录，再放进一条<b>时间线</b>和一张<b>3D 关系网</b>里，把零散的知识织成脉络。
+</p>
 
-- 后端:FastAPI + SQLAlchemy + SQLite,数据存本地
-- 前端:Nuxt 3 + TypeScript + Three.js(3D 关系网)
-- 桌面端:Electron 外壳 + PyInstaller 打包的独立后端,双击即用,无需装 Python / Node
-
----
-
-## 目录结构
-
-```
-project-root/
-├── .gitignore
-├── README.md
-├── backend/                     # FastAPI 后端
-│   ├── requirements.txt         # 锁定版本
-│   ├── run.py                   # PyInstaller 打包入口(与 app/main.py 并列)
-│   ├── local_data/              # 运行时数据
-│   │   ├── sqlite/              #   chronicle.db(自动生成,不入库)
-│   │   ├── avatars/             #   默认头像库(按人物名命名,如 关羽.jpg)
-│   │   └── icons/               #   App 图标(当前用 星图_朱砂_圆角.png,打包时自动转 .icns)
-│   └── app/
-│       ├── main.py              # 入口:挂路由、CORS、自动建表 + 轻量迁移、托管前端静态文件(打包模式)
-│       ├── core/config.py       # DB 路径、端口;区分开发/打包两种模式
-│       ├── db/                  # engine / session / base
-│       ├── models/              # person / event / event_person / relation / custom_dynasty
-│       ├── schemas/             # Pydantic
-│       ├── crud/                # 增删改查(删除人物时级联清理关系、空事件)
-│       ├── services/            # 序列化 / 默认头像库
-│       └── api/v1/endpoints/    # persons / events / relations / graph / custom_dynasties / avatars
-├── fronted_Nuxt/                # Nuxt 3 前端
-│   ├── package.json
-│   ├── nuxt.config.ts           # dev proxy:/api -> 后端
-│   ├── app.vue
-│   ├── assets/css/main.css      # 全局样式
-│   ├── composables/             # useBackendApi / usePersons / useEvents / useRelations / useDynasties / useAvatars / useToast
-│   ├── components/              # GraphView / TimelineView / PersonDrawer / EventPopover / SideRail / SearchBar / AddPanel / LibraryView / AppSelect / AppMultiSelect 等
-│   ├── pages/index.vue          # 单页:内部切换 graph / timeline 两个视图
-│   ├── types/chronicle.ts       # 数据形状
-│   └── utils/dynasty.ts         # 朝代配色 / 年份格式化
-├── desktop/                     # Electron 桌面端外壳
-│   ├── main.js                  # 主进程:找端口、拉后端、开窗口、退出清理
-│   ├── package.json             # electron + electron-builder 配置(含 extraResources / mac 目标)
-│   ├── build/                   # PyInstaller 产物(中间产物,不入库)
-│   └── dist/                    # 最终 .app / .dmg / .zip(不入库)
-└── scripts/
-    └── build-app.sh             # 一键打包脚本
-```
+<p align="center">
+  <img src="docs/graph.png" alt="人物志 · 3D 关系网" width="100%" />
+</p>
 
 ---
 
-## 使用方式
+> **人物志** 是一款 macOS 桌面应用。听历史播客、看书时，随手记下人物、事件和人物之间的关系，然后用一张可旋转缩放的 3D 关系网和一条按真实年份排列的时间线，把它们串起来看。
 
-### 方式 A:桌面 App(推荐,无需任何环境)
+## ✨ 功能特性
 
-1. 从 GitHub Releases 下载 `Chronicle-*-arm64.dmg`,双击挂载,把 `人物志.app` 拖进「应用程序」。
-2. 点击图标直接打开,和普通 macOS 软件一样。
+- 🕸️ **3D 关系网** —— Three.js 渲染的深色宇宙，拖拽旋转、滚轮缩放、悬停高亮，点击节点聚焦人物并高亮其一度关系。
+- ⟶ **时间线** —— 按真实年份定位事件；事件密集处放大后自动展开为可标注年份的区间，逐个容纳事件；支持「事件 / 人物」两种模式。
+- 👤 **人物抽屉** —— 点击任意人物，右侧滑出详情：生卒年、简介、身份、全部事件与关系，关系可在关系网中一键高亮。
+- 📚 **人物库 / 事件库** —— 集中管理，支持批量增删改与朝代 / 关键字筛选。
+- ➕ **快速录入** —— 人物 / 关系 / 事件三类；朝代分「主」（决定颜色）与「次」（补充归属）；年份用 `~` 前缀表示约略。
+- 🔍 **全局搜索** —— `⌘K` / `Ctrl+K` 搜人物、事件、朝代、关系，带最近搜索历史。
+- 🎨 **朝代配色** —— 内置朝代 + 自定义朝代/国家，可按朝代点亮/熄灭，关系网与时间线联动筛选。
+
+## 🖼️ 界面一览
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/person-drawer.png" alt="人物抽屉" width="100%"/><br/>👤 人物抽屉：生平 + 事件 + 关系</td>
+    <td align="center"><img src="docs/timeline.png" alt="时间线 · 事件" width="100%"/><br/>⟶ 时间线 · 事件模式</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/timeline-people.png" alt="时间线 · 人物" width="100%"/><br/>⟶ 时间线 · 人物模式</td>
+    <td align="center"><img src="docs/library.png" alt="人物库 / 事件库" width="100%"/><br/>📚 人物库 / 事件库</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/add-panel.png" alt="添加面板" width="100%"/><br/>➕ 添加人物 / 关系 / 事件</td>
+    <td align="center"><img src="docs/search.png" alt="全局搜索" width="100%"/><br/>🔍 全局搜索</td>
+  </tr>
+</table>
+
+## 🛠 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 前端 | Nuxt 3 · TypeScript · Three.js（3D 关系网） |
+| 后端 | FastAPI · SQLAlchemy · SQLite（数据存本地） |
+| 桌面端 | Electron 外壳 + PyInstaller 打包的独立后端，双击即用，无需装 Python / Node |
+
+## 🚀 快速开始
+
+### 方式 A：桌面 App（推荐，无需任何环境）
+
+1. 从 [GitHub Releases](../../releases) 下载 `Chronicle-*-arm64.dmg`，双击挂载，把 `人物志.app` 拖进「应用程序」。
+2. 点击图标直接打开，和普通 macOS 软件一样。
 
 > **两点说明**
-> - **未签名**:App 未做 Apple 公证,别人从网上下载后首次打开会提示「无法验证开发者」,需**右键 App → 打开 → 再点打开**(每台电脑一次)。
-> - **仅 Apple Silicon**:当前只打 arm64 包,支持 M1/M2/M3/M4;Intel Mac 需另行构建 x64 版。
+> - **未签名**：App 未做 Apple 公证，首次打开会提示「无法验证开发者」，需**右键 App → 打开 → 再点打开**（每台电脑一次）。
+> - **仅 Apple Silicon**：当前只打 arm64 包，支持 M1/M2/M3/M4；Intel Mac 需另行构建 x64 版。
 
-数据保存在 `~/Library/Application Support/chronicle-desktop/sqlite/chronicle.db`,**与源码目录无关**,升级、重装 App 都不丢数据。
+数据保存在 `~/Library/Application Support/chronicle-desktop/sqlite/chronicle.db`，**与源码目录无关**，升级、重装 App 都不丢数据。
 
-### 方式 B:源码运行(开发)
+### 方式 B：源码运行（开发）
 
-见下文「一、启动后端」「二、启动前端」。
-
----
-
-## 一、启动后端(隔离虚拟环境)
-
-后端依赖**完全隔离**在 `backend/.venv` 中,绝不装进系统 Python。
-
-首次运行先创建虚拟环境并安装依赖:
+后端依赖**完全隔离**在 `backend/.venv` 中，绝不装进系统 Python。
 
 ```bash
+# 首次：创建虚拟环境并安装依赖
 cd backend
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
-```
+# 没有 uv 时：python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-(没有 `uv` 时可用 `python3 -m venv .venv` + `.venv/bin/pip install -r requirements.txt`。)
-
-之后每次启动:
-
-```bash
-cd backend
+# 启动后端（监听 http://127.0.0.1:8000，API 文档在 /docs）
 .venv/bin/python app/main.py
 ```
 
-启动后监听 `http://127.0.0.1:8000`(API 文档在 `/docs`),首次启动自动建表,数据库为空,由前端「添加」面板或 API 写入内容。
-
-> **端口被占用?** 若 8000 已被占用,可指定端口:
->
-> ```bash
-> CHRONICLE_PORT=8001 .venv/bin/python app/main.py
-> ```
->
-> 前端代理也要指向它(见下)。Windows 下用 `.venv\Scripts\python app\main.py`。
-
-## 二、启动前端(Nuxt 3)
-
 ```bash
+# 另开终端：启动前端
 cd fronted_Nuxt
 npm install
-npm run dev      # http://localhost:3000
+npm run dev   # http://localhost:3000
 ```
 
-前端通过 `useBackendApi` 统一请求,`nuxt.config.ts` 里配置了 dev proxy,把 `/api/**` 转发到后端(默认 `http://127.0.0.1:8000`)。
+前端通过 `useBackendApi` 统一请求，`nuxt.config.ts` 里的 dev proxy 把 `/api/**` 转发到后端。
 
-**后端不在 8000 端口时**,启动前端时指定后端源地址:
+<details>
+<summary>后端不在 8000 端口 / 直连模式</summary>
 
 ```bash
+# 后端换端口
+CHRONICLE_PORT=8001 .venv/bin/python app/main.py
+
+# 前端指向新后端
 CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
+# 或直连（后端已开 CORS 允许 localhost:3000）
+NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001/api npm run dev
 ```
 
-(也可改走直连:`NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001/api npm run dev`,后端已开 CORS 允许 `localhost:3000`。)
+</details>
 
----
+## 🖱️ 操作速览
 
-## 三、打包桌面 App
+- **切换视图**：左侧竖向栏（🕸 关系网 / ⟶ 时间线）。
+- **关系网**：拖拽旋转、滚轮缩放、悬停高亮、点击打开人物抽屉；左上角为朝代颜色图例。
+- **时间线**：横向滚轴，事件卡片上下交错；点击朝代块平滑聚焦该段；右下角 ◍ 查看朝代色卡。
+- **库**：左上角「书册」按钮，批量管理人物库与事件库。
+- **添加**：右下角「+」，录入人物 / 关系 / 事件。
+- **搜索**：右上角搜索框，或 `⌘K` / `Ctrl+K` 聚焦。
+- **退出**：`Esc` 关闭抽屉 / 浮卡 / 面板。
 
-一键脚本完成「前端静态构建 → 后端 PyInstaller 打包 → Electron 打包」三步:
+## 🧑‍💻 开发者文档
 
-```bash
-./scripts/build-app.sh
-```
+### 后端 API
 
-产物在 `desktop/dist/`:
-
-- `mac-arm64/人物志.app` — 直接可用的 App
-- `Chronicle-${版本}-arm64.dmg`(如 `Chronicle-1.0.0-arm64.dmg`)— 分发用安装镜像
-- `Chronicle-${版本}-arm64.zip` — 免安装压缩包
-
-> **环境完全隔离**:后端由 PyInstaller 打包为独立可执行文件(含 Python 运行时),前端打包为静态文件塞进后端;Electron / electron-builder 装在 `desktop/node_modules`(本地)。全程不写系统 Python、不做全局 npm 安装。
-
-### 发布到 GitHub
-
-把 `Chronicle-*-arm64.dmg` 上传到 **GitHub Releases**(仓库 → Releases → Create a new release → 拖入 dmg),不要直接 commit 进 git 仓库(有 100MB 单文件限制,也会撑大历史)。Release 支持单文件最大 2GB。
-
-> 想让别人「双击即开、零提示」,需用 Apple Developer ID($99/年)签名 + 公证;不签名的话,别人右键「打开」一次即可。
-
----
-
-## 四、界面操作
-
-- 默认进入**关系网**(深色 3D 宇宙):拖动旋转、滚轮缩放、悬停高亮、点击节点打开右侧人物抽屉并高亮其一度关系;左上角为朝代颜色图例。
-- 左侧竖向切换栏(🕸 关系网 / ⟶ 时间线)切换视图;时间线为浅色横向滚轴,事件卡片上下交错,右下角 ◍ 查看朝代色卡。
-- **时间线**按真实年份定位事件;同一时间点的多个事件上下错开,事件密集处放大后该时间点会展开成一段可标注年份的区间,逐个容纳事件;点击朝代块平滑聚焦该段。
-- 左上角「书册」按钮打开**库**视图,集中管理人物库与事件库,支持批量增删改与朝代/关键字筛选。
-- 右下角「+」打开添加面板,录入人物 / 关系 / 事件;人物朝代/国家分**主**(单选,决定颜色)与**次**(多选,补充归属);年份支持 `~` 前缀表示约略年份。
-- 右上角搜索框搜人物/事件/朝代/关系(`⌘K` / `Ctrl+K` 聚焦)。
-- `Esc` 关闭抽屉 / 浮卡。
-
----
-
-## 五、后端 API
-
-前缀 `/api/v1`,返回 JSON(年份用整数,负数 = 公元前):
+前缀 `/api/v1`，返回 JSON（年份用整数，负数 = 公元前）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | `/persons` | 人物列表 / 新建 |
-| GET/PUT/DELETE | `/persons/{id}` | 单个人物 |
-| GET | `/persons/{id}/detail` | 人物 + 其全部事件 + 其全部关系(供抽屉) |
-| GET/POST | `/events` | 事件列表 / 新建 |
-| GET/PUT/DELETE | `/events/{id}` | 单个事件 |
-| GET | `/events/timeline?from=&to=` | 时间线数据(按 `year_start` 排序) |
-| GET/POST | `/relations` | 关系列表 / 新建 |
+| GET / POST | `/persons` | 人物列表 / 新建 |
+| GET / PUT / DELETE | `/persons/{id}` | 单个人物 |
+| GET | `/persons/{id}/detail` | 人物 + 其全部事件 + 其全部关系（供抽屉） |
+| GET / POST | `/events` | 事件列表 / 新建 |
+| GET / PUT / DELETE | `/events/{id}` | 单个事件 |
+| GET | `/events/timeline?from=&to=` | 时间线数据（按 `year_start` 排序） |
+| GET / POST | `/relations` | 关系列表 / 新建 |
 | DELETE | `/relations/{id}` | 删除关系 |
 | GET | `/graph` | 关系网数据 `{nodes, edges}` |
-| GET/POST | `/custom-dynasties` | 自定义朝代/国家列表 / 新建 |
-| PUT/DELETE | `/custom-dynasties/{id}` | 编辑 / 删除自定义朝代 |
+| GET / POST | `/custom-dynasties` | 自定义朝代/国家列表 / 新建 |
+| PUT / DELETE | `/custom-dynasties/{id}` | 编辑 / 删除自定义朝代 |
 | GET | `/avatars` | 默认头像库列表 |
 | GET | `/avatars/file/{name}` | 按人物名取默认头像图片 |
 
-## 六、数据模型(SQLite)
+### 数据模型（SQLite）
 
 | 表 | 字段 |
 |---|---|
@@ -187,3 +142,45 @@ CHRONICLE_BACKEND_ORIGIN=http://127.0.0.1:8001 npm run dev
 | `relations` | id, from_person_id, to_person_id, label, directed(是否单向) |
 | `custom_dynasties` | id, name, color |
 
+### 目录结构
+
+```
+project-root/
+├── backend/                     # FastAPI 后端
+│   ├── requirements.txt
+│   ├── run.py                   # PyInstaller 打包入口
+│   ├── local_data/              # 运行时数据（sqlite 不入库）
+│   └── app/                     # 入口 / 模型 / CRUD / 服务 / API
+├── fronted_Nuxt/                # Nuxt 3 前端
+│   ├── composables/             # useBackendApi / usePersons / useEvents / ...
+│   ├── components/              # GraphView / TimelineView / PersonDrawer / ...
+│   ├── pages/index.vue          # 单页：内部切换 graph / timeline
+│   └── utils/dynasty.ts         # 朝代配色 / 年份格式化
+├── desktop/                     # Electron 桌面端外壳
+├── docs/                        # 截图与演示素材
+└── scripts/build-app.sh         # 一键打包脚本
+```
+
+### 打包桌面 App
+
+一键脚本完成「前端静态构建 → 后端 PyInstaller 打包 → Electron 打包」三步：
+
+```bash
+./scripts/build-app.sh
+```
+
+产物在 `desktop/dist/`：
+
+- `mac-arm64/人物志.app` — 直接可用的 App
+- `Chronicle-${版本}-arm64.dmg` — 分发用安装镜像
+- `Chronicle-${版本}-arm64.zip` — 免安装压缩包
+
+> **环境完全隔离**：后端由 PyInstaller 打包为独立可执行文件（含 Python 运行时），前端打包为静态文件塞进后端；Electron / electron-builder 装在 `desktop/node_modules`（本地）。全程不写系统 Python、不做全局 npm 安装。
+
+发布时把 `.dmg` 上传到 **GitHub Releases**（单文件最大 2GB），不要直接 commit 进仓库。想让别人「双击即开、零提示」，需用 Apple Developer ID（$99/年）签名 + 公证。
+
+---
+
+<p align="center">
+  <sub>数据只存本地 · 无云 · 无账号 · 你的历史笔记属于你</sub>
+</p>
